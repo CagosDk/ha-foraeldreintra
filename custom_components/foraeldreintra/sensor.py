@@ -1,8 +1,7 @@
 from homeassistant.components.sensor import SensorEntity
-from homeassistant.const import CONF_NAME
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
+from homeassistant.helpers.typing import ConfigType
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 DOMAIN = "foraeldreintra"
 
@@ -10,20 +9,31 @@ async def async_setup_platform(
     hass: HomeAssistant,
     config: ConfigType,
     async_add_entities: AddEntitiesCallback,
-    discovery_info: DiscoveryInfoType | None = None,
+    discovery_info=None,
 ):
-    async_add_entities([ForældreIntraSensor("Frederik")])
-    async_add_entities([ForældreIntraSensor("Olivia")])
+    async_add_entities([
+        ForaeldreIntraSensor("Frederik"),
+        ForaeldreIntraSensor("Olivia")
+    ])
 
 
-class ForældreIntraSensor(SensorEntity):
+class ForaeldreIntraSensor(SensorEntity):
     def __init__(self, name):
-        self._attr_name = f"ForældreIntra {name}"
-        self._attr_unique_id = f"foraeldreintra_{name.lower()}"
-        self._attr_native_value = "Ingen data endnu"
-        self._attr_extra_state_attributes = {}
+        self._name = f"ForældreIntra {name}"
+        self._unique_id = f"foraeldreintra_{name.lower()}"
+        self._state = "Ingen data endnu"
+
+    @property
+    def name(self):
+        return self._name
+
+    @property
+    def unique_id(self):
+        return self._unique_id
+
+    @property
+    def state(self):
+        return self._state
 
     async def async_update(self):
-        # Her kommer scraping senere
-        self._attr_native_value = "Virker!"
-
+        self._state = "Virker!"
