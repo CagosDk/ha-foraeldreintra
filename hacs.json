@@ -1,0 +1,7 @@
+{
+  "name": "ForældreIntra",
+  "content_in_root": false,
+  "domains": ["foraeldreintra"],
+  "country": "DK",
+  "homeassistant": "2024.1.0"
+}
