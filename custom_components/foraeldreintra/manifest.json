@@ -3,9 +3,11 @@
   "name": "ForældreIntra",
   "version": "0.1.0",
   "documentation": "https://github.com/CagosDk/ha-foraeldreintra",
-  "requirements": [],
+  "requirements": [
+    "beautifulsoup4",
+    "requests"
+  ],
   "dependencies": [],
   "codeowners": ["@CagosDk"],
   "iot_class": "cloud_polling"
 }
-
