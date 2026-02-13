@@ -1,10 +1,12 @@
+from homeassistant.helpers.discovery import async_load_platform
+
 DOMAIN = "foraeldreintra"
 
 async def async_setup(hass, config):
     conf = config.get(DOMAIN)
 
     if not conf:
-        return False  # Stop cleanly hvis config mangler
+        return False
 
     hass.data[DOMAIN] = {
         "username": conf.get("username"),
@@ -12,10 +14,9 @@ async def async_setup(hass, config):
         "school_url": conf.get("school_url"),
     }
 
+    # Korrekt måde at loade platform
     hass.async_create_task(
-        hass.helpers.discovery.async_load_platform(
-            "sensor", DOMAIN, {}, config
-        )
+        async_load_platform(hass, "sensor", DOMAIN, {}, config)
     )
 
     return True
