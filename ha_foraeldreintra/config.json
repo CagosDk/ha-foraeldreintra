@@ -2,7 +2,7 @@
   "name": "ForældreIntra Scraper",
   "slug": "ha_foraeldreintra",
   "description": "Scraper SkoleIntra via Playwright",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "startup": "services",
   "boot": "auto",
   "arch": ["amd64", "aarch64"],
