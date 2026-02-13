@@ -1,7 +1,7 @@
 from homeassistant.components.sensor import SensorEntity
-from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 
 from .scraper import hent_lektier
 
@@ -17,7 +17,10 @@ async def async_setup_platform(
     password = hass.data[DOMAIN]["password"]
     school_url = hass.data[DOMAIN]["school_url"]
 
-    data = hent_lektier(username, password, school_url)
+    # Kør blocking scraping i executor
+    data = await hass.async_add_executor_job(
+        hent_lektier, username, password, school_url
+    )
 
     entities = []
     for barn, tekst in data.items():
