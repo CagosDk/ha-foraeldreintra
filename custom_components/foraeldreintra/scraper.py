@@ -3,43 +3,30 @@ from bs4 import BeautifulSoup
 
 
 def hent_lektier(username, password, school_url):
-    """
-    Logger ind på ForældreIntra og returnerer
-    en dict med antal lektier pr barn.
-    """
-
     session = requests.Session()
 
-    # 1️⃣ Login
-    login_data = {
+    # 1️⃣ Hent login-side først (vigtigt!)
+    login_page = session.get(school_url)
+    soup = BeautifulSoup(login_page.text, "html.parser")
+
+    # Find hidden inputs
+    hidden_fields = {}
+    for hidden in soup.find_all("input", type="hidden"):
+        hidden_fields[hidden.get("name")] = hidden.get("value")
+
+    # 2️⃣ Byg login payload korrekt
+    payload = {
         "UserName": username,
         "Password": password,
     }
 
-    login_url = school_url
+    payload.update(hidden_fields)
 
-    response = session.post(login_url, data=login_data)
+    # 3️⃣ Post login
+    response = session.post(school_url, data=payload)
 
-    if response.status_code != 200:
-        return {"Fejl": "Login fejlede"}
+    # DEBUG
+    if "Log ud" not in response.text and "Logout" not in response.text:
+        return {"Fejl": "Login fejlede - mulig CSRF eller forkert form action"}
 
-    # 2️⃣ Gå til forside efter login
-    response = session.get(school_url)
-
-    soup = BeautifulSoup(response.text, "html.parser")
-
-    # DEBUG: find links til børn
-    children = {}
-
-    for link in soup.find_all("a", href=True):
-        if "/parent/" in link["href"] and "Index" in link["href"]:
-            navn = link.text.strip()
-            children[navn] = link["href"]
-
-    result = {}
-
-    for navn, path in children.items():
-        # Her skal vi senere hente diary
-        result[navn] = "Fundet barn (ikke implementeret endnu)"
-
-    return result
+    return {"Login": "Virker"}
