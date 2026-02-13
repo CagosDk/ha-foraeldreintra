@@ -1,3 +1,5 @@
+raise Exception("THIS IS THE FILE BEING LOADED")
+
 from homeassistant.helpers.discovery import async_load_platform
 
 DOMAIN = "foraeldreintra"
