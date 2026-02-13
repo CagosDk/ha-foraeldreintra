@@ -1,7 +1,5 @@
-#!/bin/bash
+#!/usr/bin/with-contenv bashio
 
-export SKOLE_USERNAME="$USERNAME"
-export SKOLE_PASSWORD="$PASSWORD"
-export SCHOOL_URL="$SCHOOL_URL"
+echo "Starting ForældreIntra Scraper..."
 
 python3 /app/app.py
