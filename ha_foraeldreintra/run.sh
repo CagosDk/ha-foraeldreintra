@@ -2,4 +2,4 @@
 
 echo "Starting ForældreIntra Scraper..."
 
-python3 /app/app.py
+exec python3 /app/app.py
