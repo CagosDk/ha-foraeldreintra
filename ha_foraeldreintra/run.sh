@@ -1,7 +1,7 @@
-#!/usr/bin/with-contenv bashio
+#!/bin/bash
 
-export SKOLE_USERNAME=$(bashio::config 'username')
-export SKOLE_PASSWORD=$(bashio::config 'password')
-export SCHOOL_URL=$(bashio::config 'school_url')
+export SKOLE_USERNAME="$USERNAME"
+export SKOLE_PASSWORD="$PASSWORD"
+export SCHOOL_URL="$SCHOOL_URL"
 
 python3 /app/app.py
