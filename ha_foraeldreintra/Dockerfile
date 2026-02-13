@@ -1,30 +1,10 @@
-ARG BUILD_FROM
+ARG BUILD_FROM=mcr.microsoft.com/playwright/python:v1.42.0-jammy
 FROM $BUILD_FROM
 
-# Install system dependencies
-RUN apk add --no-cache \
-    python3 \
-    py3-pip \
-    chromium \
-    nss \
-    freetype \
-    harfbuzz \
-    ttf-freefont
-
-# Set workdir
 WORKDIR /app
 
-# Copy files
 COPY app.py /app/app.py
-COPY run.sh /app/run.sh
 
-# Install Python deps
-RUN pip3 install --no-cache-dir flask beautifulsoup4 playwright
+RUN pip install --no-cache-dir flask beautifulsoup4
 
-# Install browser
-RUN playwright install chromium
-
-# Make script executable
-RUN chmod +x /app/run.sh
-
-CMD ["/app/run.sh"]
+CMD ["python3", "/app/app.py"]
