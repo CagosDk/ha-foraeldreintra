@@ -3,10 +3,10 @@
   "slug": "ha_foraeldreintra",
   "version": "1.0.0",
   "description": "Scraper SkoleIntra via Playwright",
+  "image": "ghcr.io/home-assistant/{arch}-base:latest",
   "startup": "services",
   "boot": "auto",
   "arch": ["amd64", "aarch64", "armv7"],
-  "ingress": true,
   "ports": {
     "8080/tcp": 8080
   },
