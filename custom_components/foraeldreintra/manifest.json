@@ -1,11 +1,11 @@
 {
   "domain": "foraeldreintra",
   "name": "ForældreIntra",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "documentation": "https://github.com/CagosDk/ha-foraeldreintra",
   "requirements": [
-    "beautifulsoup4",
-    "requests"
+    "playwright==1.42.0",
+    "beautifulsoup4"
   ],
   "dependencies": [],
   "codeowners": ["@CagosDk"],
