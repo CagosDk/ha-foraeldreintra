@@ -10,6 +10,11 @@
   "ports": {
     "8080/tcp": 8080
   },
+  "environment": {
+    "USERNAME": "username",
+    "PASSWORD": "password",
+    "SCHOOL_URL": "school_url"
+  },
   "options": {
     "username": "",
     "password": "",
