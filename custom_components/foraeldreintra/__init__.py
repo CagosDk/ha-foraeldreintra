@@ -3,6 +3,9 @@ DOMAIN = "foraeldreintra"
 async def async_setup(hass, config):
     conf = config.get(DOMAIN)
 
+    if not conf:
+        return False  # Stop cleanly hvis config mangler
+
     hass.data[DOMAIN] = {
         "username": conf.get("username"),
         "password": conf.get("password"),
