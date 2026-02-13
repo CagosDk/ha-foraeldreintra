@@ -1,0 +1,21 @@
+{
+  "name": "ForældreIntra Scraper",
+  "slug": "ha_foraeldreintra",
+  "description": "Scraper SkoleIntra via Playwright",
+  "version": "1.0.0",
+  "startup": "services",
+  "boot": "auto",
+  "ports": {
+    "8080/tcp": 8080
+  },
+  "options": {
+    "username": "",
+    "password": "",
+    "school_url": ""
+  },
+  "schema": {
+    "username": "str",
+    "password": "password",
+    "school_url": "str"
+  }
+}
