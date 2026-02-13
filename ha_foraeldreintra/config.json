@@ -6,6 +6,7 @@
   "startup": "services",
   "boot": "auto",
   "arch": ["amd64", "aarch64", "armv7"],
+  "ingress": true,
   "ports": {
     "8080/tcp": 8080
   },
