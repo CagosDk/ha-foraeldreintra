@@ -1,11 +1,11 @@
 {
   "name": "ForældreIntra Scraper",
   "slug": "ha_foraeldreintra",
-  "version": "1.0.0",
   "description": "Scraper SkoleIntra via Playwright",
-  "arch": ["amd64", "aarch64", "armv7"],
+  "version": "1.0.1",
   "startup": "services",
   "boot": "auto",
+  "arch": ["amd64", "aarch64"],
   "ports": {
     "8080/tcp": 8080
   },
