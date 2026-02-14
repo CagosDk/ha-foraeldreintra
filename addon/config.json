@@ -1,0 +1,15 @@
+{
+  "name": "ForældreIntra Scraper",
+  "version": "0.0.1",
+  "slug": "ha_foraeldreintra",
+  "description": "ForældreIntra scraper using Playwright",
+  "startup": "services",
+  "boot": "auto",
+  "arch": ["amd64", "aarch64"],
+  "image": "docker.io/cagosdk/foraeldreintra:latest",
+  "ports": {
+    "8080/tcp": 8080
+  },
+  "options": {},
+  "schema": {}
+}
