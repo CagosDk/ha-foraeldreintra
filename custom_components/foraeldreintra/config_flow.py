@@ -7,7 +7,6 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .api import ForaldreIntraClient, ForaldreIntraAuthError, ForaldreIntraError
 from .const import DOMAIN, CONF_SCHOOL_URL, CONF_USERNAME, CONF_PASSWORD
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
@@ -20,6 +19,20 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
 
 
 async def _validate_input(hass: HomeAssistant, data: dict) -> dict:
+    """Valider login og at vi kan hente børn."""
+    # Lazy import: undgår at config flow handleren fejler ved import, hvis requirements mangler.
+    try:
+        from .api import (
+            ForaldreIntraClient,
+            ForaldreIntraAuthError,
+            ForaldreIntraError,
+        )
+    except Exception as err:  # noqa: BLE001
+        # Giver os en rigtig fejl i loggen i stedet for "Invalid handler specified"
+        raise RuntimeError(
+            "Kunne ikke importere foraeldreintra api (mangler dependency eller import-fejl)."
+        ) from err
+
     session = async_get_clientsession(hass)
 
     client = ForaldreIntraClient(
@@ -52,11 +65,10 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             try:
                 info = await _validate_input(self.hass, user_input)
                 return self.async_create_entry(title=info["title"], data=user_input)
-            except ForaldreIntraAuthError:
-                errors["base"] = "auth"
-            except ForaldreIntraError:
-                errors["base"] = "cannot_connect"
-            except Exception:  # noqa: BLE001
+
+            except Exception as err:  # noqa: BLE001
+                # Import/dep fejl -> giv brugeren en "unknown", men loggen vil vise den rigtige årsag.
+                # (Hvis du vil, kan vi senere mappe flere fejltyper til pænere beskeder)
                 errors["base"] = "unknown"
 
         return self.async_show_form(
