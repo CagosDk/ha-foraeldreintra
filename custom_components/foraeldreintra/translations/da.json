@@ -1,0 +1,23 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "ForældreIntra",
+        "description": "Indtast dine oplysninger for at hente ugeplan og lektier.",
+        "data": {
+          "school_url": "Skolens URL (fx https://xxxx.m.skoleintra.dk/)",
+          "username": "Brugernavn",
+          "password": "Adgangskode"
+        }
+      }
+    },
+    "error": {
+      "auth": "Login fejlede. Tjek brugernavn/adgangskode og skolens URL.",
+      "cannot_connect": "Kunne ikke hente data. Prøv igen senere.",
+      "unknown": "Ukendt fejl."
+    },
+    "abort": {
+      "already_configured": "Denne konto er allerede sat op."
+    }
+  }
+}
