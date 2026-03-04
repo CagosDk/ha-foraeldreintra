@@ -10,7 +10,6 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .api import ForaldreIntraClient, ForaldreIntraAuthError, ForaldreIntraError
 from .const import DOMAIN, CONF_SCHOOL_URL, CONF_USERNAME, CONF_PASSWORD
 
-
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_SCHOOL_URL): str,
@@ -21,7 +20,6 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
 
 
 async def _validate_input(hass: HomeAssistant, data: dict) -> dict:
-    """Valider login og at vi kan hente børn."""
     session = async_get_clientsession(hass)
 
     client = ForaldreIntraClient(
@@ -33,22 +31,19 @@ async def _validate_input(hass: HomeAssistant, data: dict) -> dict:
 
     await client.login()
     children = await client.get_children()
-
     if not children:
         raise ForaldreIntraError("Ingen børn fundet efter login")
 
-    # Title i integrations-listen
     return {"title": "ForældreIntra"}
 
 
-class ForaeldreIntraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
     async def async_step_user(self, user_input: dict | None = None) -> FlowResult:
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            # Undgå at man opretter samme konto flere gange
             await self.async_set_unique_id(
                 f"{user_input[CONF_SCHOOL_URL]}::{user_input[CONF_USERNAME]}".lower()
             )
@@ -57,7 +52,6 @@ class ForaeldreIntraConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             try:
                 info = await _validate_input(self.hass, user_input)
                 return self.async_create_entry(title=info["title"], data=user_input)
-
             except ForaldreIntraAuthError:
                 errors["base"] = "auth"
             except ForaldreIntraError:
