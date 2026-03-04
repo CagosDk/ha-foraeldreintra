@@ -1,0 +1,23 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "ForældreIntra",
+        "description": "Enter your credentials to fetch weekly plan and homework.",
+        "data": {
+          "school_url": "School URL (e.g. https://xxxx.m.skoleintra.dk/)",
+          "username": "Username",
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "auth": "Authentication failed. Check username/password and URL.",
+      "cannot_connect": "Could not connect. Please try again.",
+      "unknown": "Unknown error."
+    },
+    "abort": {
+      "already_configured": "This account is already configured."
+    }
+  }
+}
