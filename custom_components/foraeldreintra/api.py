@@ -159,46 +159,43 @@ class ForaldreIntraClient:
         return children
 
     async def get_homework(self) -> list[dict[str, Any]]:
-        """
-        Returnerer en samlet liste af lektier for alle børn.
-        Hvert item er fx:
-        {
-          "barn": "Frederik",
-          "dato": "2026-03-09",
-          "fag": "Dansk",
-          "tekst": "...",
-          "links": [{"tekst": "slide", "url": "..."}]
-        }
-        """
-        children = await self.get_children()
-        all_items: list[dict[str, Any]] = []
+    """
+    Returnerer en samlet liste af lektier for alle børn.
+    """
+    children = await self.get_children()
+    return await self.get_homework_for_children(children)
 
-        for child in children:
-            child_id = child.id
-            child_name = child.name
 
-            # Bevarer samme URL-mønster som dit API-setup.
-            diary_url = f"{self._base_url}/parent/{child_id}/{child_name}item/weeklyplansandhomework/diary"
-            diary_text = await self._get_text(diary_url)
+async def get_homework_for_children(self, children: list[Child]) -> list[dict[str, Any]]:
+    """
+    Henter lektier for en given liste af børn (så vi ikke behøver kalde get_children() igen).
+    """
+    all_items: list[dict[str, Any]] = []
 
-            diary_id = self._extract_diary_id(diary_text)
-            if not diary_id:
-                continue
+    for child in children:
+        child_id = child.id
+        child_name = child.name
 
-            notes_url = (
-                f"{self._base_url}/parent/{child_id}/{child_name}item/weeklyplansandhomework/diary/notes/{diary_id}"
-            )
-            notes_text = await self._get_text(notes_url)
+        diary_url = f"{self._base_url}/parent/{child_id}/{child_name}item/weeklyplansandhomework/diary"
+        diary_text = await self._get_text(diary_url)
 
-            parsed = self._parse_homework_notes(notes_text)
+        diary_id = self._extract_diary_id(diary_text)
+        if not diary_id:
+            continue
 
-            for item in parsed:
-                item["barn"] = child_name
-                item["dato"] = self._dk_date_to_iso(item.get("dato"))
-                all_items.append(item)
+        notes_url = (
+            f"{self._base_url}/parent/{child_id}/{child_name}item/weeklyplansandhomework/diary/notes/{diary_id}"
+        )
+        notes_text = await self._get_text(notes_url)
 
-        all_items.sort(key=lambda x: (x.get("dato") or "", x.get("barn") or "", x.get("fag") or ""))
-        return all_items
+        parsed = self._parse_homework_notes(notes_text)
+        for item in parsed:
+            item["barn"] = child_name
+            item["dato"] = self._dk_date_to_iso(item.get("dato"))
+            all_items.append(item)
+
+    all_items.sort(key=lambda x: (x.get("dato") or "", x.get("barn") or "", x.get("fag") or ""))
+    return all_items
 
     # ------------------------
     # Internals
