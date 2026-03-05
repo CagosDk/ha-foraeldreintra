@@ -19,5 +19,31 @@
     "abort": {
       "already_configured": "Denne konto er allerede sat op."
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Indstillinger",
+        "description": "Filtrering og opdateringsadfærd.",
+        "data": {
+          "selected_children": "Vælg børn (tom = alle)",
+          "include_history": "Vis historiske lektier",
+          "days_back": "Dage bagud (kun hvis historik)",
+          "days_forward": "Dage frem",
+          "hide_empty_children": "Skjul børn uden lektier i perioden",
+          "sort_mode": "Sortering",
+          "max_items": "Maks antal lektier pr. sensor",
+          "ignore_unknown_subject": "Skjul lektier med fag = Ukendt",
+          "scan_mode": "Opdateringsmetode",
+          "scan_interval_minutes": "Interval (minutter)",
+          "scan_times": "Faste tidspunkter (CSV, fx 06:30,12:00,18:30)"
+        }
+      }
+    },
+    "error": {
+      "required": "Skal udfyldes",
+      "invalid_time": "Ugyldigt format. Brug HH:MM, adskil med komma.",
+      "invalid_range": "Ugyldig værdi"
+    }
   }
 }
