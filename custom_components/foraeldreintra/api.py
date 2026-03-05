@@ -166,8 +166,8 @@ class ForaldreIntraClient:
           "barn": "Frederik",
           "dato": "2026-03-09",
           "fag": "Dansk",
-          "tekst": "Læs side 10-12",
-          "links": [{"tekst": "Opgave", "url": "..."}]
+          "tekst": "...",
+          "links": [{"tekst": "slide", "url": "..."}]
         }
         """
         children = await self.get_children()
@@ -248,6 +248,24 @@ class ForaldreIntraClient:
         def clean_text(txt: str) -> str:
             return (txt or "").replace("\xa0", " ").strip()
 
+        def normalize_subject(s: str) -> str:
+            """
+            Normaliser fag:
+              - fjern ":" hvis det findes
+              - MUSIK -> Musik, dansk -> Dansk
+            """
+            s = (s or "").strip().replace(":", "")
+            if not s:
+                return ""
+            return s.lower().capitalize()
+
+        def ensure_subject(fag: str | None) -> str:
+            """
+            Sikrer at vi ALDRIG ender med tomt fag.
+            """
+            fag_s = normalize_subject(fag or "")
+            return fag_s if fag_s else "Ukendt"
+
         for li in soup.select("ul.sk-list > li"):
             dato_tag = li.select_one("div.sk-white-box > b")
             content_div = li.select_one("div.sk-user-input")
@@ -274,7 +292,8 @@ class ForaldreIntraClient:
                 # Hvis der er en <strong> inde i noden, tolker vi den som fag-label
                 strong = node.find("strong") if hasattr(node, "find") else None
                 if strong:
-                    fag_txt = clean_text(strong.get_text(strip=True)).replace(":", "")
+                    fag_txt = clean_text(strong.get_text(strip=True))
+                    fag_txt = normalize_subject(fag_txt)
                     if fag_txt:
                         current_fag = fag_txt
                         ensure_block(current_fag)
@@ -299,16 +318,32 @@ class ForaldreIntraClient:
                 links = data.get("links") or []
 
                 # Saml linjer pænt
-                tekst = "\n".join([clean_text(x) for x in lines if clean_text(x)])
+                tekst = "\n".join([clean_text(x) for x in lines if clean_text(x)]).strip()
 
-                # Skip helt tomme “blokke”
+                # Hvis både tekst og links er tomme, giver det ingen værdi at gemme item
                 if not tekst and not links:
                     continue
+
+                # Fallback: hvis fag mangler, prøv at udlede det af første linje (fx "MUSIK: ...")
+                if (not fag or not str(fag).strip()) and tekst:
+                    first_line = tekst.splitlines()[0].strip()
+                    m = re.match(r"^([A-Za-zÆØÅæøå ]{2,30})\s*:\s*(.+)$", first_line)
+                    if m:
+                        guessed_fag = normalize_subject(m.group(1).strip())
+                        rest = m.group(2).strip()
+
+                        # sæt fag og fjern "FAG:" fra første linje
+                        fag = guessed_fag
+                        remaining_lines = tekst.splitlines()[1:]
+                        tekst = "\n".join([rest] + remaining_lines).strip()
+
+                # Sikr fag altid findes (aldrig tomt)
+                fag_final = ensure_subject(str(fag) if fag is not None else None)
 
                 result.append(
                     {
                         "dato": dato,
-                        "fag": fag or "",
+                        "fag": fag_final,
                         "tekst": tekst,
                         "links": links,
                     }
@@ -369,5 +404,4 @@ class ForaldreIntraClient:
         if not month:
             return date_str
 
-        # ISO
         return f"{year:04d}-{month:02d}-{day:02d}"
