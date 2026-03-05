@@ -13,8 +13,10 @@ from homeassistant.util import slugify
 from .const import (
     DOMAIN,
     OPT_SELECTED_CHILDREN,
-    OPT_INCLUDE_HISTORY,
-    DEFAULT_INCLUDE_HISTORY,
+    OPT_DISPLAY_PERIOD,
+    OPT_ADD_MARKDOWN,
+    DEFAULT_DISPLAY_PERIOD,
+    DEFAULT_ADD_MARKDOWN,
 )
 from .coordinator import ForaldreIntraCoordinator
 
@@ -28,29 +30,78 @@ def _parse_iso_date(s: str | None) -> date | None:
         return None
 
 
-def _filtered_items(entry: ConfigEntry, items: list[dict[str, Any]], child: str | None = None) -> list[dict[str, Any]]:
-    include_history = bool(entry.options.get(OPT_INCLUDE_HISTORY, DEFAULT_INCLUDE_HISTORY))
+def _filter_items(entry: ConfigEntry, items: list[dict[str, Any]], child: str | None = None) -> list[dict[str, Any]]:
     selected_children: list[str] = entry.options.get(OPT_SELECTED_CHILDREN, [])
+    selected_set = set(selected_children)
 
+    period = entry.options.get(OPT_DISPLAY_PERIOD, DEFAULT_DISPLAY_PERIOD)
     today = date.today()
 
     out: list[dict[str, Any]] = []
     for it in items:
         barn = (it.get("barn") or "").strip()
-        if selected_children and barn not in set(selected_children):
+
+        if selected_children and barn not in selected_set:
             continue
         if child is not None and barn != child:
             continue
 
-        if not include_history:
-            d = _parse_iso_date(it.get("dato"))
+        d = _parse_iso_date(it.get("dato"))
+
+        if period == "today_and_future":
             if d is not None and d < today:
                 continue
+        elif period == "future_only":
+            if d is not None and d <= today:
+                continue
+        # period == "all": ingen filter
 
         out.append(it)
 
     out.sort(key=lambda x: ((x.get("dato") or ""), (x.get("barn") or ""), (x.get("fag") or "")))
     return out
+
+
+def _md_escape(text: str) -> str:
+    # Minimal escaping til markdown (så det ikke ødelægger kortet)
+    return (text or "").replace("\r", "").strip()
+
+
+def _items_to_markdown(title: str, items: list[dict[str, Any]]) -> str:
+    if not items:
+        return f"### {title}\nIngen lektier i perioden."
+
+    lines: list[str] = [f"### {title}"]
+    current_date = None
+
+    for it in items:
+        d = it.get("dato") or ""
+        fag = it.get("fag") or ""
+        tekst = _md_escape(it.get("tekst") or "")
+        links = it.get("links") or []
+
+        if d != current_date:
+            current_date = d
+            lines.append(f"\n**{d}**")
+
+        head = f"- **{fag}**" if fag else "- **Ukendt**"
+        lines.append(head)
+
+        if tekst:
+            # indryk tekst under bullet
+            for tline in tekst.splitlines():
+                tline = tline.strip()
+                if tline:
+                    lines.append(f"  - {tline}")
+
+        # Links
+        for l in links:
+            txt = _md_escape(l.get("tekst") or "link")
+            url = (l.get("url") or "").strip()
+            if url:
+                lines.append(f"  - [{txt}]({url})")
+
+    return "\n".join(lines).strip()
 
 
 async def async_setup_entry(
@@ -82,6 +133,10 @@ class ForaeldreIntraBaseSensor(CoordinatorEntity[ForaldreIntraCoordinator], Sens
     def available(self) -> bool:
         return self.coordinator.last_update_success
 
+    @property
+    def _add_markdown(self) -> bool:
+        return bool(self._entry.options.get(OPT_ADD_MARKDOWN, DEFAULT_ADD_MARKDOWN))
+
 
 class ForaeldreIntraAllHomeworkSensor(ForaeldreIntraBaseSensor):
     _attr_name = "ForældreIntra lektier (alle)"
@@ -94,14 +149,18 @@ class ForaeldreIntraAllHomeworkSensor(ForaeldreIntraBaseSensor):
     @property
     def native_value(self) -> int:
         items = (self.coordinator.data or {}).get("items", [])
-        filtered = _filtered_items(self._entry, items, child=None)
+        filtered = _filter_items(self._entry, items, child=None)
         return len(filtered)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         items = (self.coordinator.data or {}).get("items", [])
-        filtered = _filtered_items(self._entry, items, child=None)
-        return {"items": filtered}
+        filtered = _filter_items(self._entry, items, child=None)
+
+        attrs: dict[str, Any] = {"items": filtered}
+        if self._add_markdown:
+            attrs["markdown"] = _items_to_markdown("Lektier (alle)", filtered)
+        return attrs
 
 
 class ForaeldreIntraChildHomeworkSensor(ForaeldreIntraBaseSensor):
@@ -116,11 +175,15 @@ class ForaeldreIntraChildHomeworkSensor(ForaeldreIntraBaseSensor):
     @property
     def native_value(self) -> int:
         items = (self.coordinator.data or {}).get("items", [])
-        filtered = _filtered_items(self._entry, items, child=self._child)
+        filtered = _filter_items(self._entry, items, child=self._child)
         return len(filtered)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         items = (self.coordinator.data or {}).get("items", [])
-        filtered = _filtered_items(self._entry, items, child=self._child)
-        return {"items": filtered}
+        filtered = _filter_items(self._entry, items, child=self._child)
+
+        attrs: dict[str, Any] = {"items": filtered}
+        if self._add_markdown:
+            attrs["markdown"] = _items_to_markdown(f"Lektier ({self._child})", filtered)
+        return attrs
