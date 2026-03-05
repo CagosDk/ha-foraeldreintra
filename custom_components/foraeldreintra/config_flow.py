@@ -103,7 +103,9 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
 
         # Default: alle børn valgt
         default_children = self._children
-        selected_default = existing.get(OPT_SELECTED_CHILDREN, default_children)
+        selected_default = existing.get(OPT_SELECTED_CHILDREN)
+        if selected_default is None or selected_default == []:
+            selected_default = default_children
 
         include_history_default = existing.get(OPT_INCLUDE_HISTORY, DEFAULT_INCLUDE_HISTORY)
 
