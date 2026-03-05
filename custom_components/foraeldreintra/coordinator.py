@@ -78,14 +78,21 @@ class ForaldreIntraCoordinator(DataUpdateCoordinator[dict]):
             raise UpdateFailed(f"Hentning fejlede: {err}") from err
 
     async def _fetch_children_and_homework(self) -> dict:
-        # Bemærk: get_homework() kalder også get_children() internt,
-        # men vi vil have børnene separat for altid at kunne lave sensorer pr. barn
+    # 1) Prøv at finde børn uden login
+    children = await self.client.get_children()
+
+    # 2) Hvis ingen børn -> login og prøv igen (kun ved behov)
+    if not children:
+        await self.client.login()
         children = await self.client.get_children()
-        items = await self.client.get_homework()
-        return {
-            "children": [{"id": c.id, "name": c.name} for c in children],
-            "items": items,
-        }
+
+    # 3) Hent lektier baseret på børnelisten (ingen dobbelt get_children)
+    items = await self.client.get_homework_for_children(children)
+
+    return {
+        "children": [{"id": c.id, "name": c.name} for c in children],
+        "items": items,
+    }
 
     def _on_success(self) -> None:
         self._consecutive_failures = 0
