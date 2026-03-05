@@ -24,7 +24,7 @@ class Child:
 
 class ForaldreIntraClient:
     """
-    Minimal async klient til ForældreIntra/SkoleIntra mobilsite.
+    Async klient til ForældreIntra/SkoleIntra mobilsite.
 
     Flow:
       - GET /Account/IdpLogin (hent __RequestVerificationToken)
@@ -50,13 +50,11 @@ class ForaldreIntraClient:
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         }
 
-        # Cached efter login
         self._home_html: str | None = None
         self._home_url: str | None = None
 
     async def login(self) -> None:
         """Login og cache den første parent-side vi lander på."""
-        # 1) GET login side for token
         async with self._session.get(self._login_url, headers=self._headers, allow_redirects=True) as resp:
             text = await resp.text()
             if resp.status >= 400:
@@ -75,7 +73,6 @@ class ForaldreIntraClient:
             "Password": self._password,
         }
 
-        # 2) POST credentials (ofte svarer den med SAML-form)
         async with self._session.post(
             self._login_url,
             data=payload,
@@ -86,7 +83,6 @@ class ForaldreIntraClient:
             if resp.status >= 400:
                 raise ForaldreIntraAuthError(f"Login POST fejlede: HTTP {resp.status}")
 
-        # 3) Find SAML form (action + hidden inputs)
         soup2 = BeautifulSoup(text2, "html.parser")
         saml_form = soup2.find("form")
         if not saml_form:
@@ -103,7 +99,6 @@ class ForaldreIntraClient:
             if name:
                 form_data[name] = value
 
-        # 4) POST SAML og land på parent-side
         async with self._session.post(
             action_url,
             data=form_data,
@@ -122,24 +117,23 @@ class ForaldreIntraClient:
         self._home_url = final_url
 
     async def get_children(self) -> list[Child]:
-        """Find børn ud fra URL og menu."""
+        """Find børn ud fra URL og menu. Hvis vi ikke er logget ind, kan listen være tom."""
         html, url = await self._get_home_html_and_url()
         soup = BeautifulSoup(html, "html.parser")
 
         children: list[Child] = []
         seen: set[tuple[str, str]] = set()
 
-        # Aktivt barn fra URL (typisk /parent/{id}/{navn}/Index)
         active_match = re.search(r"/parent/(\d+)/([^/]+)/", url or "")
         if active_match:
             child_id = active_match.group(1)
             child_name = active_match.group(2)
+            child_name = self._clean_child_name(child_name)
             key = (child_id, child_name)
             if key not in seen:
                 seen.add(key)
                 children.append(Child(id=child_id, name=child_name))
 
-        # Menu med børn (kan variere)
         menu = soup.find("div", id="sk-personal-menu-container")
         if menu:
             for link in menu.find_all("a", href=True):
@@ -150,7 +144,7 @@ class ForaldreIntraClient:
                 if "settings" in href.lower():
                     continue
                 child_id = m.group(1)
-                child_name = m.group(2)
+                child_name = self._clean_child_name(m.group(2))
                 key = (child_id, child_name)
                 if key not in seen:
                     seen.add(key)
@@ -159,47 +153,39 @@ class ForaldreIntraClient:
         return children
 
     async def get_homework(self) -> list[dict[str, Any]]:
-    """
-    Returnerer en samlet liste af lektier for alle børn.
-    """
-    children = await self.get_children()
-    return await self.get_homework_for_children(children)
+        """Henter lektier for alle børn."""
+        children = await self.get_children()
+        return await self.get_homework_for_children(children)
 
+    async def get_homework_for_children(self, children: list[Child]) -> list[dict[str, Any]]:
+        """Henter lektier for en given liste af børn (så vi undgår dobbelt get_children())."""
+        all_items: list[dict[str, Any]] = []
 
-async def get_homework_for_children(self, children: list[Child]) -> list[dict[str, Any]]:
-    """
-    Henter lektier for en given liste af børn (så vi ikke behøver kalde get_children() igen).
-    """
-    all_items: list[dict[str, Any]] = []
+        for child in children:
+            child_id = child.id
+            child_name = child.name
 
-    for child in children:
-        child_id = child.id
-        child_name = child.name
+            diary_url = f"{self._base_url}/parent/{child_id}/{child_name}item/weeklyplansandhomework/diary"
+            diary_text = await self._get_text(diary_url)
 
-        diary_url = f"{self._base_url}/parent/{child_id}/{child_name}item/weeklyplansandhomework/diary"
-        diary_text = await self._get_text(diary_url)
+            diary_id = self._extract_diary_id(diary_text)
+            if not diary_id:
+                continue
 
-        diary_id = self._extract_diary_id(diary_text)
-        if not diary_id:
-            continue
+            notes_url = (
+                f"{self._base_url}/parent/{child_id}/{child_name}item/weeklyplansandhomework/diary/notes/{diary_id}"
+            )
+            notes_text = await self._get_text(notes_url)
 
-        notes_url = (
-            f"{self._base_url}/parent/{child_id}/{child_name}item/weeklyplansandhomework/diary/notes/{diary_id}"
-        )
-        notes_text = await self._get_text(notes_url)
+            parsed = self._parse_homework_notes(notes_text)
 
-        parsed = self._parse_homework_notes(notes_text)
-        for item in parsed:
-            item["barn"] = child_name
-            item["dato"] = self._dk_date_to_iso(item.get("dato"))
-            all_items.append(item)
+            for item in parsed:
+                item["barn"] = child_name
+                item["dato"] = self._dk_date_to_iso(item.get("dato"))
+                all_items.append(item)
 
-    all_items.sort(key=lambda x: (x.get("dato") or "", x.get("barn") or "", x.get("fag") or ""))
-    return all_items
-
-    # ------------------------
-    # Internals
-    # ------------------------
+        all_items.sort(key=lambda x: (x.get("dato") or "", x.get("barn") or "", x.get("fag") or ""))
+        return all_items
 
     async def _get_home_html_and_url(self) -> tuple[str, str]:
         if self._home_html and self._home_url:
@@ -221,24 +207,24 @@ async def get_homework_for_children(self, children: list[Child]) -> list[dict[st
             return text
 
     def _extract_diary_id(self, html: str) -> str | None:
-        # Primært mønster
         m = re.search(r"weeklyplansandhomework/diary/(\d+)", html)
         if m:
             return m.group(1)
 
-        # Fallback
         m = re.search(r"diary/(\d+)(?:/|\"|'|\?)", html)
         if m:
             return m.group(1)
 
         return None
 
+    def _clean_child_name(self, name: str) -> str:
+        # I nogle flows kan navnet i URL blive "Oliviaitem" – vi fjerner "item" suffix hvis det sker.
+        n = (name or "").strip()
+        if n.lower().endswith("item"):
+            n = n[:-4]
+        return n
+
     def _parse_homework_notes(self, html: str) -> list[dict[str, Any]]:
-        """
-        Parser notes-siden, som typisk indeholder en liste:
-          <ul class="sk-list">
-            <li> ... <b>Mandag, 9. mar. 2026:</b> ... indhold ... </li>
-        """
         soup = BeautifulSoup(html, "html.parser")
         result: list[dict[str, Any]] = []
 
@@ -246,22 +232,14 @@ async def get_homework_for_children(self, children: list[Child]) -> list[dict[st
             return (txt or "").replace("\xa0", " ").strip()
 
         def normalize_subject(s: str) -> str:
-            """
-            Normaliser fag:
-              - fjern ":" hvis det findes
-              - MUSIK -> Musik, dansk -> Dansk
-            """
             s = (s or "").strip().replace(":", "")
             if not s:
                 return ""
             return s.lower().capitalize()
 
-        def ensure_subject(fag: str | None) -> str:
-            """
-            Sikrer at vi ALDRIG ender med tomt fag.
-            """
-            fag_s = normalize_subject(fag or "")
-            return fag_s if fag_s else "Ukendt"
+        def ensure_subject(s: str | None) -> str:
+            s2 = normalize_subject(s or "")
+            return s2 if s2 else "Ukendt"
 
         for li in soup.select("ul.sk-list > li"):
             dato_tag = li.select_one("div.sk-white-box > b")
@@ -269,10 +247,8 @@ async def get_homework_for_children(self, children: list[Child]) -> list[dict[st
             if not dato_tag or not content_div:
                 continue
 
-            # Dato tekst (fjern kolon)
             dato = dato_tag.get_text(strip=True).replace(":", "").strip()
 
-            # Vi bygger “blokke” pr fag, men der kan også være tekst uden fag -> fag=None
             current_fag: str | None = None
             blocks: dict[str | None, dict[str, Any]] = {}
 
@@ -281,60 +257,48 @@ async def get_homework_for_children(self, children: list[Child]) -> list[dict[st
                     blocks[fag] = {"lines": [], "links": []}
                 return blocks[fag]
 
-            # Iterér over children og sug tekst/links ud
             for node in content_div.children:
                 if getattr(node, "name", None) is None:
                     continue
 
-                # Hvis der er en <strong> inde i noden, tolker vi den som fag-label
                 strong = node.find("strong") if hasattr(node, "find") else None
                 if strong:
-                    fag_txt = clean_text(strong.get_text(strip=True))
-                    fag_txt = normalize_subject(fag_txt)
+                    fag_txt = normalize_subject(clean_text(strong.get_text(strip=True)))
                     if fag_txt:
                         current_fag = fag_txt
                         ensure_block(current_fag)
                     strong.extract()
 
-                # Links
                 for a in node.find_all("a"):
                     t = clean_text(a.get_text(strip=True)) or "link"
                     u = a.get("href")
                     ensure_block(current_fag)["links"].append({"tekst": t, "url": u})
                     a.extract()
 
-                # Resterende tekst
-                txt = node.get_text(" ", strip=True)
-                txt = clean_text(txt)
+                txt = clean_text(node.get_text(" ", strip=True))
                 if txt:
                     ensure_block(current_fag)["lines"].append(txt)
 
-            # Flatten blocks til items
             for fag, data in blocks.items():
                 lines = data.get("lines") or []
                 links = data.get("links") or []
 
-                # Saml linjer pænt
                 tekst = "\n".join([clean_text(x) for x in lines if clean_text(x)]).strip()
 
-                # Hvis både tekst og links er tomme, giver det ingen værdi at gemme item
                 if not tekst and not links:
                     continue
 
-                # Fallback: hvis fag mangler, prøv at udlede det af første linje (fx "MUSIK: ...")
+                # Fallback: udled fag fra "MUSIK: ..." hvis fag mangler
                 if (not fag or not str(fag).strip()) and tekst:
                     first_line = tekst.splitlines()[0].strip()
                     m = re.match(r"^([A-Za-zÆØÅæøå ]{2,30})\s*:\s*(.+)$", first_line)
                     if m:
                         guessed_fag = normalize_subject(m.group(1).strip())
                         rest = m.group(2).strip()
-
-                        # sæt fag og fjern "FAG:" fra første linje
                         fag = guessed_fag
                         remaining_lines = tekst.splitlines()[1:]
                         tekst = "\n".join([rest] + remaining_lines).strip()
 
-                # Sikr fag altid findes (aldrig tomt)
                 fag_final = ensure_subject(str(fag) if fag is not None else None)
 
                 result.append(
@@ -349,20 +313,13 @@ async def get_homework_for_children(self, children: list[Child]) -> list[dict[st
         return result
 
     def _dk_date_to_iso(self, date_str: str | None) -> str | None:
-        """
-        Konverterer fx 'Mandag, 9. mar. 2026' -> '2026-03-09'
-        Hvis parsing fejler, returneres originalen.
-        """
         if not date_str:
             return None
 
         s = date_str.strip()
-
-        # Fjern ugedag + komma hvis tilstede
         if "," in s:
             s = s.split(",", 1)[1].strip()
 
-        # Forvent fx: '9. mar. 2026' eller '9. marts 2026'
         m = re.match(r"^(\d{1,2})\.\s*([A-Za-zæøåÆØÅ\.]+)\s+(\d{4})$", s)
         if not m:
             return date_str
