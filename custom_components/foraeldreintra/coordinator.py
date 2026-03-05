@@ -52,8 +52,9 @@ class ForaldreIntraCoordinator(DataUpdateCoordinator[dict]):
     async def _async_update_data(self) -> dict:
         """
         Skånsom strategi:
-        - Prøv at hente (børn+lektier) uden at logge ind hver gang.
-        - Hvis auth fejler, så login og prøv én gang mere.
+        - Prøv at hente børn+lektier uden login.
+        - Hvis ingen børn -> login og prøv igen (kun ved behov).
+        - Hvis auth fejler undervejs -> re-login og prøv én gang.
         - Backoff ved gentagne fejl.
         """
         try:
@@ -63,10 +64,9 @@ class ForaldreIntraCoordinator(DataUpdateCoordinator[dict]):
 
         except ForaldreIntraAuthError as err:
             _LOGGER.debug("Auth fejl ved hentning, forsøger re-login: %s", err)
-
             try:
                 await self.client.login()
-                data = await self._fetch_children_and_homework()
+                data = await self._fetch_children_and_homework(force_login=False)
                 self._on_success()
                 return data
             except Exception as err2:  # noqa: BLE001
@@ -77,26 +77,25 @@ class ForaldreIntraCoordinator(DataUpdateCoordinator[dict]):
             self._on_failure()
             raise UpdateFailed(f"Hentning fejlede: {err}") from err
 
-    async def _fetch_children_and_homework(self) -> dict:
-    # 1) Prøv at finde børn uden login
-    children = await self.client.get_children()
-
-    # 2) Hvis ingen børn -> login og prøv igen (kun ved behov)
-    if not children:
-        await self.client.login()
+    async def _fetch_children_and_homework(self, force_login: bool = False) -> dict:
+        # 1) Prøv at finde børn (uden login)
         children = await self.client.get_children()
 
-    # 3) Hent lektier baseret på børnelisten (ingen dobbelt get_children)
-    items = await self.client.get_homework_for_children(children)
+        # 2) Hvis ingen børn -> login og prøv igen (kun ved behov)
+        if force_login or not children:
+            await self.client.login()
+            children = await self.client.get_children()
 
-    return {
-        "children": [{"id": c.id, "name": c.name} for c in children],
-        "items": items,
-    }
+        # 3) Hent lektier ud fra børnelisten (ingen dobbelt get_children)
+        items = await self.client.get_homework_for_children(children)
+
+        return {
+            "children": [{"id": c.id, "name": c.name} for c in children],
+            "items": items,
+        }
 
     def _on_success(self) -> None:
         self._consecutive_failures = 0
-        # Reset interval til default hvis vi har backoff’et
         desired = timedelta(minutes=DEFAULT_SCAN_INTERVAL_MINUTES)
         if self.update_interval != desired:
             self.update_interval = desired
