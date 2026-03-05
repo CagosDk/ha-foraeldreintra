@@ -19,5 +19,25 @@
     "abort": {
       "already_configured": "Denne konto er allerede sat op."
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Indstillinger",
+        "description": "Vælg hvilke børn der vises samt opdatering.",
+        "data": {
+          "selected_children": "Børn",
+          "include_history": "Vis historik (slå fra for kun i dag og frem)",
+          "scan_mode": "Opdateringsmetode",
+          "scan_interval_minutes": "Interval (minutter)",
+          "scan_times": "Faste tidspunkter (CSV, fx 06:30,12:00,18:30)"
+        }
+      }
+    },
+    "error": {
+      "required": "Skal udfyldes",
+      "invalid_time": "Ugyldigt format. Brug HH:MM, adskil med komma.",
+      "invalid_range": "Ugyldig værdi"
+    }
   }
 }
