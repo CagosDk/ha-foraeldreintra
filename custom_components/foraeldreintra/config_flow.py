@@ -18,11 +18,15 @@ from .const import (
     OPT_SELECTED_CHILDREN,
     OPT_DISPLAY_PERIOD,
     OPT_ADD_MARKDOWN,
+    OPT_SHOW_ALL_SENSOR,
+    OPT_AUTO_REMOVE_UNSELECTED,
     OPT_SCAN_MODE,
     OPT_SCAN_INTERVAL_MINUTES,
     OPT_SCAN_TIMES,
     DEFAULT_DISPLAY_PERIOD,
     DEFAULT_ADD_MARKDOWN,
+    DEFAULT_SHOW_ALL_SENSOR,
+    DEFAULT_AUTO_REMOVE_UNSELECTED,
     DEFAULT_SCAN_MODE,
     DEFAULT_SCAN_INTERVAL_MINUTES,
     DEFAULT_SCAN_TIMES,
@@ -104,19 +108,11 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         if (selected_default is None or selected_default == []) and self._children:
             selected_default = list(self._children)
 
-        # Migrering fra ældre option "include_history" hvis den findes:
-        # include_history=True => "all", False => "today_and_future"
-        legacy_include_history = existing.get("include_history")
-        display_default = existing.get(OPT_DISPLAY_PERIOD)
-        if display_default is None:
-            if legacy_include_history is True:
-                display_default = "all"
-            elif legacy_include_history is False:
-                display_default = "today_and_future"
-            else:
-                display_default = DEFAULT_DISPLAY_PERIOD
-
+        display_default = existing.get(OPT_DISPLAY_PERIOD, DEFAULT_DISPLAY_PERIOD)
         markdown_default = bool(existing.get(OPT_ADD_MARKDOWN, DEFAULT_ADD_MARKDOWN))
+
+        show_all_default = bool(existing.get(OPT_SHOW_ALL_SENSOR, DEFAULT_SHOW_ALL_SENSOR))
+        auto_remove_default = bool(existing.get(OPT_AUTO_REMOVE_UNSELECTED, DEFAULT_AUTO_REMOVE_UNSELECTED))
 
         scan_mode_default = existing.get(OPT_SCAN_MODE, DEFAULT_SCAN_MODE)
         scan_interval_default = int(existing.get(OPT_SCAN_INTERVAL_MINUTES, DEFAULT_SCAN_INTERVAL_MINUTES))
@@ -144,7 +140,14 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 if not cleaned.get(OPT_SELECTED_CHILDREN) and self._children:
                     cleaned[OPT_SELECTED_CHILDREN] = list(self._children)
 
-                # Polish: ryd irrelevante felter
+                # Sikr booleans
+                cleaned[OPT_SHOW_ALL_SENSOR] = bool(cleaned.get(OPT_SHOW_ALL_SENSOR, DEFAULT_SHOW_ALL_SENSOR))
+                cleaned[OPT_AUTO_REMOVE_UNSELECTED] = bool(
+                    cleaned.get(OPT_AUTO_REMOVE_UNSELECTED, DEFAULT_AUTO_REMOVE_UNSELECTED)
+                )
+                cleaned[OPT_ADD_MARKDOWN] = bool(cleaned.get(OPT_ADD_MARKDOWN, DEFAULT_ADD_MARKDOWN))
+
+                # Polish: ryd irrelevante scan-felter
                 if scan_mode == "interval":
                     cleaned[OPT_SCAN_TIMES] = ""
                     cleaned[OPT_SCAN_INTERVAL_MINUTES] = int(
@@ -153,10 +156,6 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 else:
                     cleaned[OPT_SCAN_INTERVAL_MINUTES] = DEFAULT_SCAN_INTERVAL_MINUTES
                     cleaned[OPT_SCAN_TIMES] = (cleaned.get(OPT_SCAN_TIMES) or "").strip()
-
-                # Ryd legacy key hvis den findes (så vi kun har én sandhed)
-                if "include_history" in cleaned:
-                    cleaned.pop("include_history", None)
 
                 return self.async_create_entry(title="", data=cleaned)
 
@@ -173,7 +172,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             )
             schema_dict[vol.Required(OPT_SELECTED_CHILDREN, default=selected_default)] = children_selector
 
-        # Visningsperiode selector
+        # Visningsperiode
         display_selector = selector.SelectSelector(
             selector.SelectSelectorConfig(
                 options=[
@@ -187,7 +186,12 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         )
         schema_dict[vol.Required(OPT_DISPLAY_PERIOD, default=display_default)] = display_selector
 
+        # Markdown attribute
         schema_dict[vol.Required(OPT_ADD_MARKDOWN, default=markdown_default)] = bool
+
+        # "Alle"-sensor + auto-remove
+        schema_dict[vol.Required(OPT_SHOW_ALL_SENSOR, default=show_all_default)] = bool
+        schema_dict[vol.Required(OPT_AUTO_REMOVE_UNSELECTED, default=auto_remove_default)] = bool
 
         # Scan mode (pæn dropdown)
         scan_mode_selector = selector.SelectSelector(
@@ -202,7 +206,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         )
         schema_dict[vol.Required(OPT_SCAN_MODE, default=scan_mode_default)] = scan_mode_selector
 
-        # Optional så "Send" ikke blokeres
+        # Optional ellers bliver "Send" blokeret
         schema_dict[vol.Optional(OPT_SCAN_INTERVAL_MINUTES, default=scan_interval_default)] = vol.Coerce(int)
         schema_dict[vol.Optional(OPT_SCAN_TIMES, default=scan_times_default)] = str
 
