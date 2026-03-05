@@ -20,7 +20,15 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 
-class ForaldreIntraCoordinator(DataUpdateCoordinator[list[dict]]):
+class ForaldreIntraCoordinator(DataUpdateCoordinator[dict]):
+    """
+    coordinator.data format:
+      {
+        "children": [{"id": "...", "name": "Olivia"}, ...],
+        "items": [ ... homework items ... ]
+      }
+    """
+
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         self.entry = entry
         self.session = async_get_clientsession(hass)
@@ -32,6 +40,8 @@ class ForaldreIntraCoordinator(DataUpdateCoordinator[list[dict]]):
             school_url=entry.data[CONF_SCHOOL_URL],
         )
 
+        self._consecutive_failures = 0
+
         super().__init__(
             hass,
             _LOGGER,
@@ -39,18 +49,67 @@ class ForaldreIntraCoordinator(DataUpdateCoordinator[list[dict]]):
             update_interval=timedelta(minutes=DEFAULT_SCAN_INTERVAL_MINUTES),
         )
 
-    async def _async_update_data(self) -> list[dict]:
+    async def _async_update_data(self) -> dict:
+        """
+        Skånsom strategi:
+        - Prøv at hente (børn+lektier) uden at logge ind hver gang.
+        - Hvis auth fejler, så login og prøv én gang mere.
+        - Backoff ved gentagne fejl.
+        """
         try:
-            # Login hver refresh er OK som MVP; senere kan vi optimere/cashe session.
-            await self.client.login()
-            data = await self.client.get_homework()
+            data = await self._fetch_children_and_homework()
+            self._on_success()
             return data
 
         except ForaldreIntraAuthError as err:
-            raise UpdateFailed(f"Auth fejl: {err}") from err
+            _LOGGER.debug("Auth fejl ved hentning, forsøger re-login: %s", err)
 
-        except ForaldreIntraError as err:
-            raise UpdateFailed(f"ForældreIntra fejl: {err}") from err
+            try:
+                await self.client.login()
+                data = await self._fetch_children_and_homework()
+                self._on_success()
+                return data
+            except Exception as err2:  # noqa: BLE001
+                self._on_failure()
+                raise UpdateFailed(f"Auth fejl efter re-login: {err2}") from err2
 
-        except Exception as err:  # noqa: BLE001
-            raise UpdateFailed(f"Ukendt fejl: {err}") from err
+        except (ForaldreIntraError, Exception) as err:  # noqa: BLE001
+            self._on_failure()
+            raise UpdateFailed(f"Hentning fejlede: {err}") from err
+
+    async def _fetch_children_and_homework(self) -> dict:
+        # Bemærk: get_homework() kalder også get_children() internt,
+        # men vi vil have børnene separat for altid at kunne lave sensorer pr. barn
+        children = await self.client.get_children()
+        items = await self.client.get_homework()
+        return {
+            "children": [{"id": c.id, "name": c.name} for c in children],
+            "items": items,
+        }
+
+    def _on_success(self) -> None:
+        self._consecutive_failures = 0
+        # Reset interval til default hvis vi har backoff’et
+        desired = timedelta(minutes=DEFAULT_SCAN_INTERVAL_MINUTES)
+        if self.update_interval != desired:
+            self.update_interval = desired
+            _LOGGER.debug("Reset update_interval til %s", self.update_interval)
+
+    def _on_failure(self) -> None:
+        self._consecutive_failures += 1
+
+        # Simple backoff: efter 3 fejl -> 30 min, efter 6 fejl -> 60 min
+        if self._consecutive_failures >= 6:
+            new_interval = timedelta(minutes=60)
+        elif self._consecutive_failures >= 3:
+            new_interval = timedelta(minutes=30)
+        else:
+            return
+
+        if self.update_interval != new_interval:
+            self.update_interval = new_interval
+            _LOGGER.warning(
+                "Gentagne fejl (%s). Backoff: update_interval sat til %s",
+                self._consecutive_failures,
+                self.update_interval,
+            )
