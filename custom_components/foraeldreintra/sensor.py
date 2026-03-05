@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date, datetime
 from typing import Any
 
 from homeassistant.components.sensor import SensorEntity
@@ -9,8 +10,47 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import slugify
 
-from .const import DOMAIN
+from .const import (
+    DOMAIN,
+    OPT_SELECTED_CHILDREN,
+    OPT_INCLUDE_HISTORY,
+    DEFAULT_INCLUDE_HISTORY,
+)
 from .coordinator import ForaldreIntraCoordinator
+
+
+def _parse_iso_date(s: str | None) -> date | None:
+    if not s:
+        return None
+    try:
+        return datetime.strptime(s, "%Y-%m-%d").date()
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _filtered_items(entry: ConfigEntry, items: list[dict[str, Any]], child: str | None = None) -> list[dict[str, Any]]:
+    include_history = bool(entry.options.get(OPT_INCLUDE_HISTORY, DEFAULT_INCLUDE_HISTORY))
+    selected_children: list[str] = entry.options.get(OPT_SELECTED_CHILDREN, [])
+
+    today = date.today()
+
+    out: list[dict[str, Any]] = []
+    for it in items:
+        barn = (it.get("barn") or "").strip()
+        if selected_children and barn not in set(selected_children):
+            continue
+        if child is not None and barn != child:
+            continue
+
+        if not include_history:
+            d = _parse_iso_date(it.get("dato"))
+            if d is not None and d < today:
+                continue
+
+        out.append(it)
+
+    out.sort(key=lambda x: ((x.get("dato") or ""), (x.get("barn") or ""), (x.get("fag") or "")))
+    return out
 
 
 async def async_setup_entry(
@@ -19,17 +59,16 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     coordinator: ForaldreIntraCoordinator = hass.data[DOMAIN][entry.entry_id]
+    data = coordinator.data or {}
+    children = [c.get("name") for c in data.get("children", []) if c.get("name")]
+    selected_children: list[str] = entry.options.get(OPT_SELECTED_CHILDREN, children)
 
-    entities: list[SensorEntity] = [
-        ForaeldreIntraAllHomeworkSensor(coordinator, entry),
-    ]
+    entities: list[SensorEntity] = [ForaeldreIntraAllHomeworkSensor(coordinator, entry)]
 
-    # Opret altid en sensor pr. barn baseret på coordinator.data["children"]
-    children = (coordinator.data or {}).get("children", [])
-    for child in children:
-        name = (child.get("name") or "").strip()
-        if name:
-            entities.append(ForaeldreIntraChildHomeworkSensor(coordinator, entry, name))
+    for child_name in children:
+        if selected_children and child_name not in set(selected_children):
+            continue
+        entities.append(ForaeldreIntraChildHomeworkSensor(coordinator, entry, child_name))
 
     async_add_entities(entities)
 
@@ -55,11 +94,14 @@ class ForaeldreIntraAllHomeworkSensor(ForaeldreIntraBaseSensor):
     @property
     def native_value(self) -> int:
         items = (self.coordinator.data or {}).get("items", [])
-        return len(items)
+        filtered = _filtered_items(self._entry, items, child=None)
+        return len(filtered)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        return {"items": (self.coordinator.data or {}).get("items", [])}
+        items = (self.coordinator.data or {}).get("items", [])
+        filtered = _filtered_items(self._entry, items, child=None)
+        return {"items": filtered}
 
 
 class ForaeldreIntraChildHomeworkSensor(ForaeldreIntraBaseSensor):
@@ -74,10 +116,11 @@ class ForaeldreIntraChildHomeworkSensor(ForaeldreIntraBaseSensor):
     @property
     def native_value(self) -> int:
         items = (self.coordinator.data or {}).get("items", [])
-        return len([i for i in items if (i.get("barn") or "") == self._child])
+        filtered = _filtered_items(self._entry, items, child=self._child)
+        return len(filtered)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         items = (self.coordinator.data or {}).get("items", [])
-        child_items = [i for i in items if (i.get("barn") or "") == self._child]
-        return {"items": child_items}
+        filtered = _filtered_items(self._entry, items, child=self._child)
+        return {"items": filtered}
