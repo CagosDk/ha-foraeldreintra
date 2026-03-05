@@ -112,6 +112,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         if user_input is not None:
             scan_mode = user_input.get(OPT_SCAN_MODE, DEFAULT_SCAN_MODE)
 
+            # --- Validation afhængigt af scan_mode ---
             if scan_mode == "interval":
                 minutes = int(user_input.get(OPT_SCAN_INTERVAL_MINUTES, DEFAULT_SCAN_INTERVAL_MINUTES))
                 if minutes < 1 or minutes > 1440:
@@ -125,7 +126,22 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     errors[OPT_SCAN_TIMES] = "invalid_time"
 
             if not errors:
-                return self.async_create_entry(title="", data=user_input)
+                # --- POLISH: ryd irrelevante felter før vi gemmer ---
+                cleaned = dict(user_input)
+
+                if scan_mode == "interval":
+                    # ignorér scan_times helt
+                    cleaned[OPT_SCAN_TIMES] = ""
+                    # sørg for at interval altid er et tal
+                    cleaned[OPT_SCAN_INTERVAL_MINUTES] = int(
+                        cleaned.get(OPT_SCAN_INTERVAL_MINUTES, DEFAULT_SCAN_INTERVAL_MINUTES)
+                    )
+                else:  # fixed_times
+                    # ignorér interval (vi gemmer et fornuftigt tal, men coordinator ignorerer det)
+                    cleaned[OPT_SCAN_INTERVAL_MINUTES] = DEFAULT_SCAN_INTERVAL_MINUTES
+                    cleaned[OPT_SCAN_TIMES] = (cleaned.get(OPT_SCAN_TIMES) or "").strip()
+
+                return self.async_create_entry(title="", data=cleaned)
 
         # Checkbox multi-select (LIST)
         children_selector = selector.SelectSelector(
