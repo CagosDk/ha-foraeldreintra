@@ -34,11 +34,6 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
     }
 )
 
-SCAN_MODE_OPTIONS = {
-    "interval": "Interval",
-    "fixed_times": "Faste tidspunkter",
-}
-
 
 async def _validate_input(hass: HomeAssistant, data: dict) -> dict:
     session = async_get_clientsession(hass)
@@ -48,10 +43,12 @@ async def _validate_input(hass: HomeAssistant, data: dict) -> dict:
         password=data[CONF_PASSWORD],
         school_url=data[CONF_SCHOOL_URL],
     )
+
     await client.login()
     children = await client.get_children()
     if not children:
         raise ForaldreIntraError("Ingen børn fundet efter login")
+
     return {"title": "ForældreIntra"}
 
 
@@ -92,16 +89,15 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
     async def async_step_init(self, user_input: dict | None = None) -> FlowResult:
         errors: dict[str, str] = {}
 
-        # Hent børneliste så vi kan lave “checkbox multi-select”
+        # Hent børneliste så vi kan vise checkbox multi-select
         try:
             self._children = await self._fetch_children_names()
         except Exception:  # noqa: BLE001
             self._children = []
 
-        # Defaults
         existing = self.entry.options
 
-        # Default: alle børn valgt
+        # Default: alle børn valgt (også hvis der ikke står noget eller står tom liste)
         default_children = self._children
         selected_default = existing.get(OPT_SELECTED_CHILDREN)
         if selected_default is None or selected_default == []:
@@ -114,7 +110,6 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         scan_times_default = existing.get(OPT_SCAN_TIMES, DEFAULT_SCAN_TIMES)
 
         if user_input is not None:
-            # Validation
             scan_mode = user_input.get(OPT_SCAN_MODE, DEFAULT_SCAN_MODE)
 
             if scan_mode == "interval":
@@ -129,17 +124,27 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 elif not self._validate_times_csv(csv):
                     errors[OPT_SCAN_TIMES] = "invalid_time"
 
-            # Selected children må gerne være tom liste i UI,
-            # men du bad om “alle valgt som default” – ikke at forbyde tom.
-            # Vi lader tom være muligt, men så vil der ikke blive lavet barn-sensorer.
             if not errors:
                 return self.async_create_entry(title="", data=user_input)
 
+        # Checkbox multi-select (LIST)
         children_selector = selector.SelectSelector(
             selector.SelectSelectorConfig(
                 options=self._children,
                 multiple=True,
-                mode=selector.SelectSelectorMode.LIST,  # checkboxes i UI
+                mode=selector.SelectSelectorMode.LIST,
+            )
+        )
+
+        # Pæn dropdown for scan_mode
+        scan_mode_selector = selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=[
+                    selector.SelectOptionDict(value="interval", label="Interval"),
+                    selector.SelectOptionDict(value="fixed_times", label="Faste tidspunkter"),
+                ],
+                multiple=False,
+                mode=selector.SelectSelectorMode.DROPDOWN,
             )
         )
 
@@ -147,7 +152,8 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             {
                 vol.Required(OPT_SELECTED_CHILDREN, default=selected_default): children_selector,
                 vol.Required(OPT_INCLUDE_HISTORY, default=include_history_default): bool,
-                vol.Required(OPT_SCAN_MODE, default=scan_mode_default): vol.In(list(SCAN_MODE_OPTIONS.keys())),
+                vol.Required(OPT_SCAN_MODE, default=scan_mode_default): scan_mode_selector,
+                # Optional: ellers blokerer UI "Send" når det ikke er relevant
                 vol.Optional(OPT_SCAN_INTERVAL_MINUTES, default=scan_interval_default): vol.Coerce(int),
                 vol.Optional(OPT_SCAN_TIMES, default=scan_times_default): str,
             }
