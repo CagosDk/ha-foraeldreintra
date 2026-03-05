@@ -16,11 +16,13 @@ from .const import (
     CONF_USERNAME,
     CONF_PASSWORD,
     OPT_SELECTED_CHILDREN,
-    OPT_INCLUDE_HISTORY,
+    OPT_DISPLAY_PERIOD,
+    OPT_ADD_MARKDOWN,
     OPT_SCAN_MODE,
     OPT_SCAN_INTERVAL_MINUTES,
     OPT_SCAN_TIMES,
-    DEFAULT_INCLUDE_HISTORY,
+    DEFAULT_DISPLAY_PERIOD,
+    DEFAULT_ADD_MARKDOWN,
     DEFAULT_SCAN_MODE,
     DEFAULT_SCAN_INTERVAL_MINUTES,
     DEFAULT_SCAN_TIMES,
@@ -89,7 +91,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
     async def async_step_init(self, user_input: dict | None = None) -> FlowResult:
         errors: dict[str, str] = {}
 
-        # Hent børn – men lad aldrig flowet crashe hvis det fejler
+        # Hent børn (fail-safe)
         try:
             self._children = await self._fetch_children_names()
         except Exception:  # noqa: BLE001
@@ -97,15 +99,28 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
 
         existing = self.entry.options
 
-        include_history_default = existing.get(OPT_INCLUDE_HISTORY, DEFAULT_INCLUDE_HISTORY)
-        scan_mode_default = existing.get(OPT_SCAN_MODE, DEFAULT_SCAN_MODE)
-        scan_interval_default = int(existing.get(OPT_SCAN_INTERVAL_MINUTES, DEFAULT_SCAN_INTERVAL_MINUTES))
-        scan_times_default = existing.get(OPT_SCAN_TIMES, DEFAULT_SCAN_TIMES)
-
         # Default: alle børn valgt (hvis vi kender dem)
         selected_default = existing.get(OPT_SELECTED_CHILDREN)
         if (selected_default is None or selected_default == []) and self._children:
             selected_default = list(self._children)
+
+        # Migrering fra ældre option "include_history" hvis den findes:
+        # include_history=True => "all", False => "today_and_future"
+        legacy_include_history = existing.get("include_history")
+        display_default = existing.get(OPT_DISPLAY_PERIOD)
+        if display_default is None:
+            if legacy_include_history is True:
+                display_default = "all"
+            elif legacy_include_history is False:
+                display_default = "today_and_future"
+            else:
+                display_default = DEFAULT_DISPLAY_PERIOD
+
+        markdown_default = bool(existing.get(OPT_ADD_MARKDOWN, DEFAULT_ADD_MARKDOWN))
+
+        scan_mode_default = existing.get(OPT_SCAN_MODE, DEFAULT_SCAN_MODE)
+        scan_interval_default = int(existing.get(OPT_SCAN_INTERVAL_MINUTES, DEFAULT_SCAN_INTERVAL_MINUTES))
+        scan_times_default = existing.get(OPT_SCAN_TIMES, DEFAULT_SCAN_TIMES)
 
         if user_input is not None:
             scan_mode = user_input.get(OPT_SCAN_MODE, DEFAULT_SCAN_MODE)
@@ -129,7 +144,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 if not cleaned.get(OPT_SELECTED_CHILDREN) and self._children:
                     cleaned[OPT_SELECTED_CHILDREN] = list(self._children)
 
-                # Polish: ryd irrelevante felter før vi gemmer
+                # Polish: ryd irrelevante felter
                 if scan_mode == "interval":
                     cleaned[OPT_SCAN_TIMES] = ""
                     cleaned[OPT_SCAN_INTERVAL_MINUTES] = int(
@@ -139,11 +154,15 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     cleaned[OPT_SCAN_INTERVAL_MINUTES] = DEFAULT_SCAN_INTERVAL_MINUTES
                     cleaned[OPT_SCAN_TIMES] = (cleaned.get(OPT_SCAN_TIMES) or "").strip()
 
+                # Ryd legacy key hvis den findes (så vi kun har én sandhed)
+                if "include_history" in cleaned:
+                    cleaned.pop("include_history", None)
+
                 return self.async_create_entry(title="", data=cleaned)
 
-        schema_dict = {}
+        schema_dict: dict = {}
 
-        # Børn (checkbox multi-select) – kun hvis vi faktisk har børn
+        # Børn selector (checkboxes)
         if self._children:
             children_selector = selector.SelectSelector(
                 selector.SelectSelectorConfig(
@@ -154,8 +173,23 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             )
             schema_dict[vol.Required(OPT_SELECTED_CHILDREN, default=selected_default)] = children_selector
 
-        schema_dict[vol.Required(OPT_INCLUDE_HISTORY, default=include_history_default)] = bool
+        # Visningsperiode selector
+        display_selector = selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=[
+                    {"value": "all", "label": "Historik + i dag + frem"},
+                    {"value": "today_and_future", "label": "Kun i dag + frem"},
+                    {"value": "future_only", "label": "Kun frem (fra i morgen)"},
+                ],
+                multiple=False,
+                mode=selector.SelectSelectorMode.DROPDOWN,
+            )
+        )
+        schema_dict[vol.Required(OPT_DISPLAY_PERIOD, default=display_default)] = display_selector
 
+        schema_dict[vol.Required(OPT_ADD_MARKDOWN, default=markdown_default)] = bool
+
+        # Scan mode (pæn dropdown)
         scan_mode_selector = selector.SelectSelector(
             selector.SelectSelectorConfig(
                 options=[
@@ -168,7 +202,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         )
         schema_dict[vol.Required(OPT_SCAN_MODE, default=scan_mode_default)] = scan_mode_selector
 
-        # Optional ellers bliver "Send" blokeret
+        # Optional så "Send" ikke blokeres
         schema_dict[vol.Optional(OPT_SCAN_INTERVAL_MINUTES, default=scan_interval_default)] = vol.Coerce(int)
         schema_dict[vol.Optional(OPT_SCAN_TIMES, default=scan_times_default)] = str
 
