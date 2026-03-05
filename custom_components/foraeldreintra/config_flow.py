@@ -94,6 +94,9 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             self._children = await self._fetch_children_names()
         except Exception:  # noqa: BLE001
             self._children = []
+        # Hvis der ikke allerede er gemt valgte børn, så sæt default til alle nu
+        if OPT_SELECTED_CHILDREN not in existing and self._children:
+            selected_default = self._children
 
         existing = self.entry.options
 
