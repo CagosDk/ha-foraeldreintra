@@ -2,8 +2,18 @@ from __future__ import annotations
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
+from homeassistant.util import slugify
 
-from .const import DOMAIN, PLATFORMS
+from .const import (
+    DOMAIN,
+    PLATFORMS,
+    OPT_AUTO_REMOVE_UNSELECTED,
+    OPT_SHOW_ALL_SENSOR,
+    OPT_SELECTED_CHILDREN,
+    DEFAULT_AUTO_REMOVE_UNSELECTED,
+    DEFAULT_SHOW_ALL_SENSOR,
+)
 from .coordinator import ForaldreIntraCoordinator
 
 
@@ -16,21 +26,66 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up via UI config flow."""
     coordinator = ForaldreIntraCoordinator(hass, entry)
 
-    # Gem coordinator så sensor.py kan finde den
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = coordinator
 
-    # Listener: når options ændres, så:
-    # 1) opdater schedule + trigger refresh NU
-    # 2) reload entry så sensorer matcher valg af børn
+    async def _remove_unselected_entities(updated_entry: ConfigEntry) -> None:
+        """Fjern entities fra entity registry (opt-in)."""
+        reg = er.async_get(hass)
+
+        # 1) "Alle" sensor
+        show_all = bool(updated_entry.options.get(OPT_SHOW_ALL_SENSOR, DEFAULT_SHOW_ALL_SENSOR))
+        if not show_all:
+            unique = f"{entry.entry_id}_homework_all"
+            entity_id = reg.async_get_entity_id("sensor", DOMAIN, unique)
+            if entity_id:
+                reg.async_remove(entity_id)
+
+        # 2) Børnesensorer
+        selected_names = set(updated_entry.options.get(OPT_SELECTED_CHILDREN, []))
+        selected_slugs = {slugify(n) for n in selected_names}
+
+        # Vi fjerner alle child sensors som ikke er selected.
+        # unique_id format: "{entry_id}_homework_{slug(child)}"
+        prefix = f"{entry.entry_id}_homework_"
+        all_unique = f"{entry.entry_id}_homework_all"
+
+        # entity registry kan itereres via .entities
+        for entity in list(reg.entities.values()):
+            if entity.domain != "sensor":
+                continue
+            if entity.platform != DOMAIN:
+                continue
+            if not entity.unique_id:
+                continue
+            if not entity.unique_id.startswith(prefix):
+                continue
+            if entity.unique_id == all_unique:
+                continue
+
+            child_slug = entity.unique_id.replace(prefix, "", 1)
+
+            # Hvis der ikke er valgt nogen børn, så fjerner vi ikke automatisk
+            # (ellers kan man komme til at “slette alt” ved en fejlklik)
+            if not selected_slugs:
+                continue
+
+            if child_slug not in selected_slugs:
+                reg.async_remove(entity.entity_id)
+
     async def _options_updated(_: HomeAssistant, updated_entry: ConfigEntry) -> None:
+        """Når options ændres: (opt-in) auto-remove + refresh nu + reload."""
         if updated_entry.entry_id != entry.entry_id:
             return
 
-        # opdater coordinatorens entry reference + schedule og trigger immediate refresh
-        await coordinator.async_update_options(updated_entry)
+        if bool(updated_entry.options.get(OPT_AUTO_REMOVE_UNSELECTED, DEFAULT_AUTO_REMOVE_UNSELECTED)):
+            await _remove_unselected_entities(updated_entry)
 
-        # reload så entity-listen (barn-sensorer) følger de nye options
+        # Opdater coordinator schedule + trigger refresh nu
+        if hasattr(coordinator, "async_update_options"):
+            await coordinator.async_update_options(updated_entry)
+
+        # Reload så entity-listen matcher valg af børn/"alle"
         await hass.config_entries.async_reload(entry.entry_id)
 
     entry.async_on_unload(entry.add_update_listener(_options_updated))
@@ -48,7 +103,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
-        # ryd schedule-triggers hvis de findes
         if coordinator and hasattr(coordinator, "async_shutdown"):
             try:
                 await coordinator.async_shutdown()
