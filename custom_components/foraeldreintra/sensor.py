@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import date, datetime
 from typing import Any
 
@@ -15,10 +16,16 @@ from .const import (
     OPT_SELECTED_CHILDREN,
     OPT_DISPLAY_PERIOD,
     OPT_ADD_MARKDOWN,
+    OPT_SHOW_ALL_SENSOR,
     DEFAULT_DISPLAY_PERIOD,
     DEFAULT_ADD_MARKDOWN,
+    DEFAULT_SHOW_ALL_SENSOR,
 )
 from .coordinator import ForaldreIntraCoordinator
+
+
+DK_WEEKDAY = ["Søndag", "Mandag", "Tirsdag", "Onsdag", "Torsdag", "Fredag", "Lørdag"]
+DK_MONTH = ["januar", "februar", "marts", "april", "maj", "juni", "juli", "august", "september", "oktober", "november", "december"]
 
 
 def _parse_iso_date(s: str | None) -> date | None:
@@ -54,7 +61,7 @@ def _filter_items(entry: ConfigEntry, items: list[dict[str, Any]], child: str | 
         elif period == "future_only":
             if d is not None and d <= today:
                 continue
-        # period == "all": ingen filter
+        # "all": ingen filter
 
         out.append(it)
 
@@ -62,46 +69,91 @@ def _filter_items(entry: ConfigEntry, items: list[dict[str, Any]], child: str | 
     return out
 
 
-def _md_escape(text: str) -> str:
-    # Minimal escaping til markdown (så det ikke ødelægger kortet)
-    return (text or "").replace("\r", "").strip()
+def _pretty_title_case(s: str) -> str:
+    s = (s or "").strip()
+    if not s:
+        return s
+    lower = s.lower()
+    return lower[0].upper() + lower[1:]
 
 
-def _items_to_markdown(title: str, items: list[dict[str, Any]]) -> str:
-    if not items:
-        return f"### {title}\nIngen lektier i perioden."
+def _format_header(date_iso: str) -> str:
+    # date_iso: YYYY-MM-DD
+    d = _parse_iso_date(date_iso)
+    if not d:
+        return f"# <u>{date_iso}</u>"
+    wd = DK_WEEKDAY[d.weekday() + 1 if d.weekday() < 6 else 0]  # python: Mon=0..Sun=6
+    # For at undgå bøvl, brug datetime til weekday korrekt:
+    dt = datetime(d.year, d.month, d.day)
+    wd = DK_WEEKDAY[dt.weekday() + 1 if dt.weekday() < 6 else 0]  # samme som ovenfor
+    # Mere robust:
+    wd = DK_WEEKDAY[(dt.weekday() + 1) % 7]  # Mandag->1 => "Mandag" ved index 1
 
-    lines: list[str] = [f"### {title}"]
-    current_date = None
+    return f"# <u>{wd} d.{d.day} {DK_MONTH[d.month - 1]} {d.year}</u>"
+
+
+def _safe(v: Any) -> str:
+    return (v or "").to_string().strip() if hasattr(v, "to_string") else str(v or "").strip()
+
+
+def _build_markdown(items: list[dict[str, Any]]) -> str:
+    # Node-RED format: dato -> barn -> fag -> blocks
+    by_date: dict[str, dict[str, dict[str, list[str]]]] = {}
 
     for it in items:
-        d = it.get("dato") or ""
-        fag = it.get("fag") or ""
-        tekst = _md_escape(it.get("tekst") or "")
-        links = it.get("links") or []
+        dato = (it.get("dato") or "").strip()
+        barn = (it.get("barn") or "").strip() or "Ukendt"
 
-        if d != current_date:
-            current_date = d
-            lines.append(f"\n**{d}**")
+        fag = (it.get("fag") or "").strip()
+        tekst = (it.get("tekst") or "").strip()
+        links = it.get("links") if isinstance(it.get("links"), list) else []
 
-        head = f"- **{fag}**" if fag else "- **Ukendt**"
-        lines.append(head)
+        # Skip tomme entries
+        if not tekst and not links:
+            continue
 
-        if tekst:
-            # indryk tekst under bullet
-            for tline in tekst.splitlines():
-                tline = tline.strip()
-                if tline:
-                    lines.append(f"  - {tline}")
+        # Heuristik: udled fag fra tekststart, fx "MUSIK: ..."
+        if not fag and tekst:
+            m = re.match(r"^([A-ZÆØÅ0-9 .\-]{2,30}):\s*([\s\S]*)$", tekst)
+            if m:
+                fag = m.group(1).strip()
+                tekst = (m.group(2) or "").strip()
 
-        # Links
+        if not fag:
+            fag = "Ukendt fag"
+        elif fag != "Ukendt fag":
+            fag = _pretty_title_case(fag)
+
+        by_date.setdefault(dato, {}).setdefault(barn, {}).setdefault(fag, [])
+
+        block = tekst
         for l in links:
-            txt = _md_escape(l.get("tekst") or "link")
-            url = (l.get("url") or "").strip()
-            if url:
-                lines.append(f"  - [{txt}]({url})")
+            t = (l.get("tekst") or "link").strip()
+            u = (l.get("url") or "").strip()
+            if u:
+                block += f"\n- [{t}]({u})"
 
-    return "\n".join(lines).strip()
+        by_date[dato][barn][fag].append(block.strip())
+
+    dates = sorted([d for d in by_date.keys() if d])
+
+    out = ""
+    for i, d_iso in enumerate(dates):
+        if i > 0:
+            out += "\n\n---\n"
+        out += f"{_format_header(d_iso)}\n\n"
+
+        children = sorted(by_date[d_iso].keys())
+        for child in children:
+            out += f"## {child}\n"
+            subjects = sorted(by_date[d_iso][child].keys())
+            for subject in subjects:
+                out += f"<u>{subject}:</u>\n"
+                for b in by_date[d_iso][child][subject]:
+                    out += f"{b}\n\n"
+                out += "\n"
+
+    return out.strip() if out.strip() else "Ingen lektier fundet."
 
 
 async def async_setup_entry(
@@ -112,9 +164,13 @@ async def async_setup_entry(
     coordinator: ForaldreIntraCoordinator = hass.data[DOMAIN][entry.entry_id]
     data = coordinator.data or {}
     children = [c.get("name") for c in data.get("children", []) if c.get("name")]
+
     selected_children: list[str] = entry.options.get(OPT_SELECTED_CHILDREN, children)
 
-    entities: list[SensorEntity] = [ForaeldreIntraAllHomeworkSensor(coordinator, entry)]
+    entities: list[SensorEntity] = []
+
+    if bool(entry.options.get(OPT_SHOW_ALL_SENSOR, DEFAULT_SHOW_ALL_SENSOR)):
+        entities.append(ForaeldreIntraAllHomeworkSensor(coordinator, entry))
 
     for child_name in children:
         if selected_children and child_name not in set(selected_children):
@@ -156,10 +212,9 @@ class ForaeldreIntraAllHomeworkSensor(ForaeldreIntraBaseSensor):
     def extra_state_attributes(self) -> dict[str, Any]:
         items = (self.coordinator.data or {}).get("items", [])
         filtered = _filter_items(self._entry, items, child=None)
-
         attrs: dict[str, Any] = {"items": filtered}
         if self._add_markdown:
-            attrs["markdown"] = _items_to_markdown("Lektier (alle)", filtered)
+            attrs["markdown"] = _build_markdown(filtered)
         return attrs
 
 
@@ -182,8 +237,7 @@ class ForaeldreIntraChildHomeworkSensor(ForaeldreIntraBaseSensor):
     def extra_state_attributes(self) -> dict[str, Any]:
         items = (self.coordinator.data or {}).get("items", [])
         filtered = _filter_items(self._entry, items, child=self._child)
-
         attrs: dict[str, Any] = {"items": filtered}
         if self._add_markdown:
-            attrs["markdown"] = _items_to_markdown(f"Lektier ({self._child})", filtered)
+            attrs["markdown"] = _build_markdown(filtered)
         return attrs
