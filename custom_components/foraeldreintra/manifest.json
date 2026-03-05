@@ -1,7 +1,7 @@
 {
   "domain": "foraeldreintra",
   "name": "ForældreIntra",
-  "version": "0.0.9",
+  "version": "0.0.10",
   "documentation": "https://github.com/CagosDk/ha-foraeldreintra",
   "issue_tracker": "https://github.com/CagosDk/ha-foraeldreintra/issues",
   "codeowners": ["@CagosDk"],
