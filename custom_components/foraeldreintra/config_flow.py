@@ -146,8 +146,8 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 vol.Required(OPT_SELECTED_CHILDREN, default=selected_default): children_selector,
                 vol.Required(OPT_INCLUDE_HISTORY, default=include_history_default): bool,
                 vol.Required(OPT_SCAN_MODE, default=scan_mode_default): vol.In(list(SCAN_MODE_OPTIONS.keys())),
-                vol.Required(OPT_SCAN_INTERVAL_MINUTES, default=scan_interval_default): vol.Coerce(int),
-                vol.Required(OPT_SCAN_TIMES, default=scan_times_default): str,
+                vol.Optional(OPT_SCAN_INTERVAL_MINUTES, default=scan_interval_default): vol.Coerce(int),
+                vol.Optional(OPT_SCAN_TIMES, default=scan_times_default): str,
             }
         )
 
