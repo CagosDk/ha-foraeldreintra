@@ -24,10 +24,13 @@
     "step": {
       "init": {
         "title": "Indstillinger",
-        "description": "Vælg hvilke børn der vises samt opdatering.",
+        "description": "Vælg hvilke børn der vises samt opdatering og visning.",
         "data": {
           "selected_children": "Børn",
-          "include_history": "Vis historik (slå fra for kun i dag og frem)",
+          "display_period": "Visningsperiode",
+          "add_markdown": "Tilføj markdown-attribut (til dashboard)",
+          "show_all_sensor": "Vis \"alle\"-sensor",
+          "auto_remove_unselected": "Auto-fjern fravalgte sensorer",
           "scan_mode": "Opdateringsmetode",
           "scan_interval_minutes": "Interval (minutter)",
           "scan_times": "Faste tidspunkter (CSV, fx 06:30,12:00,18:30)"
