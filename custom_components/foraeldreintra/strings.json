@@ -5,45 +5,19 @@
         "title": "ForældreIntra",
         "description": "Enter your credentials to fetch weekly plan and homework.",
         "data": {
-          "school_url": "School URL",
+          "school_url": "School URL (e.g. https://xxxx.m.skoleintra.dk/)",
           "username": "Username",
           "password": "Password"
         }
       }
     },
     "error": {
-      "auth": "Authentication failed.",
-      "cannot_connect": "Could not connect.",
+      "auth": "Authentication failed. Check username/password and URL.",
+      "cannot_connect": "Could not connect. Please try again.",
       "unknown": "Unknown error."
     },
     "abort": {
       "already_configured": "This account is already configured."
-    }
-  },
-  "options": {
-    "step": {
-      "init": {
-        "title": "Options",
-        "description": "Filtering and refresh behavior.",
-        "data": {
-          "selected_children": "Children (empty = all)",
-          "include_history": "Include history",
-          "days_back": "Days back",
-          "days_forward": "Days forward",
-          "hide_empty_children": "Hide empty children",
-          "sort_mode": "Sort mode",
-          "max_items": "Max items per sensor",
-          "ignore_unknown_subject": "Ignore subject = Unknown",
-          "scan_mode": "Scan mode",
-          "scan_interval_minutes": "Interval minutes",
-          "scan_times": "Fixed times (CSV, e.g. 06:30,12:00)"
-        }
-      }
-    },
-    "error": {
-      "required": "Required",
-      "invalid_time": "Invalid time format",
-      "invalid_range": "Invalid range"
     }
   }
 }
