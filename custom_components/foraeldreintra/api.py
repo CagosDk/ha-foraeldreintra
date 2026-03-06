@@ -218,7 +218,7 @@ class ForaldreIntraClient:
         return None
 
     def _clean_child_name(self, name: str) -> str:
-        # I nogle flows kan navnet i URL blive "Oliviaitem" – vi fjerner "item" suffix hvis det sker.
+        # I nogle flows kan navnet i URL blive "Nameitem" – vi fjerner "item" suffix hvis det sker.
         n = (name or "").strip()
         if n.lower().endswith("item"):
             n = n[:-4]
