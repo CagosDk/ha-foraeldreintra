@@ -69,7 +69,7 @@ class ForaldreIntraCoordinator(DataUpdateCoordinator[dict]):
         for u in self._unsubs:
             try:
                 u()
-            except Exception:  # noqa: BLE001
+            except Exception:
                 pass
         self._unsubs = []
 
@@ -83,7 +83,6 @@ class ForaldreIntraCoordinator(DataUpdateCoordinator[dict]):
             csv = self.entry.options.get(OPT_SCAN_TIMES, DEFAULT_SCAN_TIMES)
             times = _parse_times_csv(csv)
 
-            # fallback hvis ingen tider er angivet
             if not times:
                 self.update_interval = timedelta(minutes=DEFAULT_SCAN_INTERVAL_MINUTES)
                 return
@@ -114,7 +113,6 @@ class ForaldreIntraCoordinator(DataUpdateCoordinator[dict]):
         self.async_request_refresh()
 
     async def async_update_options(self, new_entry: ConfigEntry) -> None:
-        # Opdater entry reference + schedule, og hent data NU
         self.entry = new_entry
         self._apply_schedule_from_options()
         self.async_request_refresh()
@@ -124,14 +122,12 @@ class ForaldreIntraCoordinator(DataUpdateCoordinator[dict]):
             return await self._fetch_children_and_homework()
         except (ForaldreIntraAuthError, ForaldreIntraError) as err:
             raise UpdateFailed(str(err)) from err
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             raise UpdateFailed(f"Ukendt fejl: {err}") from err
 
     async def _fetch_children_and_homework(self) -> dict:
-        # Prøv først uden login (kan være tomt ved kold start)
         children = await self.client.get_children()
 
-        # Hvis ingen børn -> login og prøv igen
         if not children:
             await self.client.login()
             children = await self.client.get_children()
