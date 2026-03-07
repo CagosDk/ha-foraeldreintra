@@ -201,7 +201,7 @@ class ForaeldreIntraBaseSensor(CoordinatorEntity[ForaldreIntraCoordinator], Sens
 
 
 class ForaeldreIntraAllHomeworkSensor(ForaeldreIntraBaseSensor):
-    _attr_name = "ForældreIntra lektier (alle)"
+    _attr_name = "ForældreIntra lektier (alle) test123" 
     _attr_icon = "mdi:book-open-page-variant"
 
     def __init__(self, coordinator: ForaldreIntraCoordinator, entry: ConfigEntry) -> None:
@@ -231,7 +231,7 @@ class ForaeldreIntraChildHomeworkSensor(ForaeldreIntraBaseSensor):
     def __init__(self, coordinator: ForaldreIntraCoordinator, entry: ConfigEntry, child_name: str) -> None:
         super().__init__(coordinator, entry)
         self._child = child_name
-        self._attr_name = f"ForældreIntra lektier ({child_name})"
+        self._attr_name = f"ForældreIntra lektier test123 ({child_name})"
         self._attr_unique_id = f"{entry.entry_id}_homework_{slugify(child_name)}"
 
     @property
