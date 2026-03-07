@@ -8,7 +8,6 @@ PLATFORMS = ["sensor"]
 
 # Options
 OPT_SELECTED_CHILDREN = "selected_children"  # list[str]
-
 OPT_SHOW_ALL_SENSOR = "show_all_sensor"
 DEFAULT_SHOW_ALL_SENSOR = True
 
