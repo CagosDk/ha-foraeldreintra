@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from datetime import date, timedelta
+from html import unescape
 from typing import Any
 
 from aiohttp import ClientSession
@@ -264,7 +266,6 @@ class ForaldreIntraClient:
         return None
 
     def _clean_child_name(self, name: str) -> str:
-        # I nogle flows kan navnet i URL blive "Nameitem" – vi fjerner "item" suffix hvis det sker.
         n = (name or "").strip()
         if n.lower().endswith("item"):
             n = n[:-4]
@@ -334,7 +335,6 @@ class ForaldreIntraClient:
                 if not tekst and not links:
                     continue
 
-                # Fallback: udled fag fra "MUSIK: ..." hvis fag mangler
                 if (not fag or not str(fag).strip()) and tekst:
                     first_line = tekst.splitlines()[0].strip()
                     m = re.match(r"^([A-Za-zÆØÅæøå ]{2,30})\s*:\s*(.+)$", first_line)
@@ -381,90 +381,199 @@ class ForaldreIntraClient:
         url: str,
     ) -> dict[str, Any] | None:
         soup = BeautifulSoup(html, "html.parser")
+        root = soup.select_one("#root")
+
+        if not root:
+            return None
+
+        raw = root.get("data-clientlogic-settings-WeeklyPlansApp")
+        if not raw:
+            return None
+
+        try:
+            data = json.loads(raw)
+        except Exception:
+            return None
+
+        selected = data.get("SelectedPlan") or {}
+        if not selected:
+            return None
 
         def clean_text(txt: str) -> str:
             return (txt or "").replace("\xa0", " ").strip()
 
-        def html_block_to_text(node: Any) -> str:
-            if node is None:
+        def html_to_text(fragment: str) -> str:
+            if not fragment:
                 return ""
 
-            clone = BeautifulSoup(str(node), "html.parser")
+            fragment = unescape(fragment)
+            frag_soup = BeautifulSoup(fragment, "html.parser")
 
-            for br in clone.find_all("br"):
+            for br in frag_soup.find_all("br"):
                 br.replace_with("\n")
 
-            for a in clone.find_all("a"):
-                text = clean_text(a.get_text(" ", strip=True)) or "link"
-                href = a.get("href", "").strip()
-                if href:
-                    a.replace_with(f"{text} ({href})")
+            lines: list[str] = []
+
+            def parse_list(list_tag: Any, level: int = 0) -> None:
+                for li in list_tag.find_all("li", recursive=False):
+                    text_parts: list[str] = []
+                    nested_lists: list[Any] = []
+
+                    for child in li.children:
+                        child_tag_name = getattr(child, "name", None)
+                        if child_tag_name in ("ul", "ol"):
+                            nested_lists.append(child)
+                        else:
+                            if hasattr(child, "get_text"):
+                                piece = clean_text(child.get_text(" ", strip=True))
+                            else:
+                                piece = clean_text(str(child))
+                            if piece:
+                                text_parts.append(piece)
+
+                    line = clean_text(" ".join(text_parts))
+                    if line:
+                        indent = "  " * level
+                        lines.append(f"{indent}• {line}")
+
+                    for nested in nested_lists:
+                        parse_list(nested, level + 1)
+
+            top_nodes = list(frag_soup.children)
+            for node in top_nodes:
+                tag_name = getattr(node, "name", None)
+
+                if tag_name in ("ul", "ol"):
+                    parse_list(node, 0)
+                    continue
+
+                if hasattr(node, "get_text"):
+                    txt = clean_text(node.get_text(" ", strip=True))
                 else:
-                    a.replace_with(text)
+                    txt = clean_text(str(node))
 
-            text = clone.get_text("\n", strip=True)
-            lines = [clean_text(line) for line in text.splitlines()]
-            lines = [line for line in lines if line]
-            return "\n".join(lines).strip()
+                if txt:
+                    lines.append(txt)
 
-        items: list[dict[str, str]] = []
+            if not lines:
+                txt = clean_text(frag_soup.get_text("\n", strip=True))
+                if txt:
+                    lines = [clean_text(line) for line in txt.splitlines() if clean_text(line)]
 
-        for li in soup.select("ul.sk-list > li"):
-            header_tag = li.select_one("div.sk-white-box > b") or li.select_one("b")
-            content_tag = li.select_one("div.sk-user-input") or li
+            return "\n".join(line for line in lines if line).strip()
 
-            header = clean_text(header_tag.get_text(" ", strip=True)) if header_tag else ""
-            text = html_block_to_text(content_tag)
+        formatted_week = selected.get("FormattedWeek") or week_key
+        class_or_group = selected.get("ClassOrGroup")
+        general_plan = selected.get("GeneralPlan") or {}
+        daily_plans = selected.get("DailyPlans") or []
 
-            if header_tag:
-                header_text = clean_text(header_tag.get_text(" ", strip=True))
-                if text.startswith(header_text):
-                    text = text[len(header_text):].strip()
+        general_items: list[dict[str, Any]] = []
+        for lesson in general_plan.get("LessonPlans") or []:
+            subject_obj = lesson.get("Subject") or {}
+            subject = subject_obj.get("FormattedTitle") or subject_obj.get("Title") or ""
+            content_html = lesson.get("Content") or ""
 
-            if header or text:
-                items.append(
-                    {
-                        "overskrift": header,
-                        "tekst": text,
-                    }
-                )
-
-        if not items:
-            main = (
-                soup.select_one("div.sk-user-input")
-                or soup.select_one("main")
-                or soup.select_one("body")
+            general_items.append(
+                {
+                    "subject": clean_text(subject),
+                    "lesson_number": subject_obj.get("LessonNumber"),
+                    "content_html": content_html,
+                    "content_text": html_to_text(content_html),
+                }
             )
-            fallback_text = html_block_to_text(main)
-            if fallback_text:
-                items.append(
+
+        days: list[dict[str, Any]] = []
+        for day in daily_plans:
+            lesson_plans: list[dict[str, Any]] = []
+            for lesson in day.get("LessonPlans") or []:
+                subject_obj = lesson.get("Subject") or {}
+                subject = subject_obj.get("FormattedTitle") or subject_obj.get("Title") or ""
+                content_html = lesson.get("Content") or ""
+
+                lesson_plans.append(
                     {
-                        "overskrift": "",
-                        "tekst": fallback_text,
+                        "subject": clean_text(subject),
+                        "lesson_number": subject_obj.get("LessonNumber"),
+                        "content_html": content_html,
+                        "content_text": html_to_text(content_html),
+                        "link": lesson.get("Link"),
+                        "attachments": lesson.get("Attachments") or [],
                     }
                 )
 
-        if not items:
+            schedule_items: list[dict[str, Any]] = []
+            for sched in day.get("Schedule") or []:
+                schedule_items.append(
+                    {
+                        "time": sched.get("TimeString"),
+                        "title": sched.get("Title"),
+                        "class_name": sched.get("ClassName"),
+                        "subject_short": sched.get("ShortSubjectTitle"),
+                        "subject_full": sched.get("FullSubjectTitle"),
+                        "lesson_number": sched.get("LessonNumber"),
+                    }
+                )
+
+            days.append(
+                {
+                    "date": day.get("Date"),
+                    "day": day.get("Day"),
+                    "formatted_date": day.get("FormattedDate"),
+                    "long_formatted_date": day.get("LongFormattedDate"),
+                    "lesson_plans": lesson_plans,
+                    "schedule": schedule_items,
+                }
+            )
+
+        if not general_items and not days:
             return None
 
         markdown_parts: list[str] = []
-        for item in items:
-            overskrift = clean_text(item.get("overskrift", ""))
-            tekst = clean_text(item.get("tekst", ""))
+        title = f"Ugeplan for {class_or_group} - uge {formatted_week}" if class_or_group else f"Ugeplan {formatted_week}"
+        markdown_parts.append(f"# {title}")
 
-            if overskrift:
-                markdown_parts.append(f"## {overskrift}")
-            if tekst:
-                markdown_parts.append(tekst)
+        if general_items:
+            markdown_parts.append("## Generelt")
+            for item in general_items:
+                if item["subject"]:
+                    markdown_parts.append(f"### {item['subject']}")
+                if item["content_text"]:
+                    markdown_parts.append(item["content_text"])
+
+        for day in days:
+            header = day.get("day") or ""
+            if day.get("formatted_date"):
+                header = f"{header} {day['formatted_date']}".strip()
+
+            if header:
+                markdown_parts.append(f"## {header}")
+
+            for lesson in day.get("lesson_plans", []):
+                subject = lesson.get("subject") or "Ukendt fag"
+                markdown_parts.append(f"### {subject}")
+                if lesson.get("content_text"):
+                    markdown_parts.append(lesson["content_text"])
+
+            schedule = day.get("schedule") or []
+            if schedule:
+                schedule_lines = ["### Skema"]
+                for row in schedule:
+                    time_str = row.get("time") or ""
+                    title_str = row.get("title") or ""
+                    if time_str or title_str:
+                        schedule_lines.append(f"- {time_str} — {title_str}".strip())
+                markdown_parts.append("\n".join(schedule_lines))
 
         markdown = "\n\n".join(part for part in markdown_parts if part).strip()
 
         return {
             "barn": child_name,
-            "week": week_key,
-            "title": f"Ugeplan {week_key}",
-            "items": items,
-            "markdown": markdown or "Ingen ugeplan fundet.",
+            "week": formatted_week,
+            "title": title,
+            "class_or_group": class_or_group,
+            "general": general_items,
+            "days": days,
+            "markdown": markdown,
             "url": url,
         }
 
