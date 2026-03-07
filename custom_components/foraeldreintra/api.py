@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from datetime import date, timedelta
 from typing import Any
 
 from aiohttp import ClientSession
@@ -27,12 +28,13 @@ class ForaldreIntraClient:
     Async klient til ForældreIntra/SkoleIntra mobilsite.
 
     Flow:
-      - GET /Account/IdpLogin (hent __RequestVerificationToken)
-      - POST credentials
-      - Find og POST SAML-form (action + hidden inputs)
-      - Land på /parent/{childId}/{childName}/...
-      - Find børn i menu + fra URL
-      - For hvert barn: hent diary, find diary_id, hent notes, parse lektier
+    - GET /Account/IdpLogin (hent __RequestVerificationToken)
+    - POST credentials
+    - Find og POST SAML-form (action + hidden inputs)
+    - Land på /parent/{childId}/{childName}/...
+    - Find børn i menu + fra URL
+    - For hvert barn: hent diary, find diary_id, hent notes, parse lektier
+    - For hvert barn: prøv ugeplan for nyeste relevante uge
     """
 
     def __init__(self, session: ClientSession, username: str, password: str, school_url: str) -> None:
@@ -44,7 +46,6 @@ class ForaldreIntraClient:
         self._password = password
         self._base_url = school_url.rstrip("/")
         self._login_url = f"{self._base_url}/Account/IdpLogin"
-
         self._headers = {
             "User-Agent": "Mozilla/5.0 (Home Assistant ForaldreIntra)",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -111,13 +112,18 @@ class ForaldreIntraClient:
                 raise ForaldreIntraAuthError(f"SAML POST fejlede: HTTP {resp.status}")
 
         if "/parent/" not in final_url:
-            raise ForaldreIntraAuthError(f"Landede ikke på parent-side efter SAML. URL: {final_url}")
+            raise ForaldreIntraAuthError(
+                f"Landede ikke på parent-side efter SAML. URL: {final_url}"
+            )
 
         self._home_html = final_text
         self._home_url = final_url
 
     async def get_children(self) -> list[Child]:
-        """Find børn ud fra URL og menu. Hvis vi ikke er logget ind, kan listen være tom."""
+        """
+        Find børn ud fra URL og menu.
+        Hvis vi ikke er logget ind, kan listen være tom.
+        """
         html, url = await self._get_home_html_and_url()
         soup = BeautifulSoup(html, "html.parser")
 
@@ -158,7 +164,7 @@ class ForaldreIntraClient:
         return await self.get_homework_for_children(children)
 
     async def get_homework_for_children(self, children: list[Child]) -> list[dict[str, Any]]:
-        """Henter lektier for en given liste af børn (så vi undgår dobbelt get_children())."""
+        """Henter lektier for en given liste af børn."""
         all_items: list[dict[str, Any]] = []
 
         for child in children:
@@ -178,7 +184,6 @@ class ForaldreIntraClient:
             notes_text = await self._get_text(notes_url)
 
             parsed = self._parse_homework_notes(notes_text)
-
             for item in parsed:
                 item["barn"] = child_name
                 item["dato"] = self._dk_date_to_iso(item.get("dato"))
@@ -186,6 +191,47 @@ class ForaldreIntraClient:
 
         all_items.sort(key=lambda x: (x.get("dato") or "", x.get("barn") or "", x.get("fag") or ""))
         return all_items
+
+    async def get_weekplans_for_children(self, children: list[Child]) -> dict[str, dict[str, Any]]:
+        """Henter nyeste ugeplan for hver elev."""
+        result: dict[str, dict[str, Any]] = {}
+
+        for child in children:
+            plan = await self.get_latest_weekplan_for_child(child)
+            if plan:
+                result[child.name] = plan
+
+        return result
+
+    async def get_latest_weekplan_for_child(self, child: Child) -> dict[str, Any] | None:
+        """
+        Prøver de mest relevante uge-nøgler og returnerer den nyeste tilgængelige ugeplan.
+        Prøver næste uge først og derefter denne uge.
+        """
+        child_id = child.id
+        child_name = child.name
+
+        for week_key in self._candidate_week_keys():
+            url = (
+                f"{self._base_url}/parent/"
+                f"{child_id}/{child_name}item/weeklyplansandhomework/item/class/{week_key}"
+            )
+
+            try:
+                html = await self._get_text(url)
+            except ForaldreIntraError:
+                continue
+
+            parsed = self._parse_weekplan(
+                html=html,
+                child_name=child_name,
+                week_key=week_key,
+                url=url,
+            )
+            if parsed:
+                return parsed
+
+        return None
 
     async def _get_home_html_and_url(self) -> tuple[str, str]:
         if self._home_html and self._home_url:
@@ -244,6 +290,7 @@ class ForaldreIntraClient:
         for li in soup.select("ul.sk-list > li"):
             dato_tag = li.select_one("div.sk-white-box > b")
             content_div = li.select_one("div.sk-user-input")
+
             if not dato_tag or not content_div:
                 continue
 
@@ -282,7 +329,6 @@ class ForaldreIntraClient:
             for fag, data in blocks.items():
                 lines = data.get("lines") or []
                 links = data.get("links") or []
-
                 tekst = "\n".join([clean_text(x) for x in lines if clean_text(x)]).strip()
 
                 if not tekst and not links:
@@ -311,6 +357,116 @@ class ForaldreIntraClient:
                 )
 
         return result
+
+    def _week_key_for_date(self, d: date) -> str:
+        iso_year, iso_week, _ = d.isocalendar()
+        return f"{iso_week:02d}-{iso_year}"
+
+    def _candidate_week_keys(self) -> list[str]:
+        today = date.today()
+        current_week = self._week_key_for_date(today)
+        next_week = self._week_key_for_date(today + timedelta(days=7))
+
+        keys: list[str] = []
+        for key in [next_week, current_week]:
+            if key not in keys:
+                keys.append(key)
+        return keys
+
+    def _parse_weekplan(
+        self,
+        html: str,
+        child_name: str,
+        week_key: str,
+        url: str,
+    ) -> dict[str, Any] | None:
+        soup = BeautifulSoup(html, "html.parser")
+
+        def clean_text(txt: str) -> str:
+            return (txt or "").replace("\xa0", " ").strip()
+
+        def html_block_to_text(node: Any) -> str:
+            if node is None:
+                return ""
+
+            clone = BeautifulSoup(str(node), "html.parser")
+
+            for br in clone.find_all("br"):
+                br.replace_with("\n")
+
+            for a in clone.find_all("a"):
+                text = clean_text(a.get_text(" ", strip=True)) or "link"
+                href = a.get("href", "").strip()
+                if href:
+                    a.replace_with(f"{text} ({href})")
+                else:
+                    a.replace_with(text)
+
+            text = clone.get_text("\n", strip=True)
+            lines = [clean_text(line) for line in text.splitlines()]
+            lines = [line for line in lines if line]
+            return "\n".join(lines).strip()
+
+        items: list[dict[str, str]] = []
+
+        for li in soup.select("ul.sk-list > li"):
+            header_tag = li.select_one("div.sk-white-box > b") or li.select_one("b")
+            content_tag = li.select_one("div.sk-user-input") or li
+
+            header = clean_text(header_tag.get_text(" ", strip=True)) if header_tag else ""
+            text = html_block_to_text(content_tag)
+
+            if header_tag:
+                header_text = clean_text(header_tag.get_text(" ", strip=True))
+                if text.startswith(header_text):
+                    text = text[len(header_text):].strip()
+
+            if header or text:
+                items.append(
+                    {
+                        "overskrift": header,
+                        "tekst": text,
+                    }
+                )
+
+        if not items:
+            main = (
+                soup.select_one("div.sk-user-input")
+                or soup.select_one("main")
+                or soup.select_one("body")
+            )
+            fallback_text = html_block_to_text(main)
+            if fallback_text:
+                items.append(
+                    {
+                        "overskrift": "",
+                        "tekst": fallback_text,
+                    }
+                )
+
+        if not items:
+            return None
+
+        markdown_parts: list[str] = []
+        for item in items:
+            overskrift = clean_text(item.get("overskrift", ""))
+            tekst = clean_text(item.get("tekst", ""))
+
+            if overskrift:
+                markdown_parts.append(f"## {overskrift}")
+            if tekst:
+                markdown_parts.append(tekst)
+
+        markdown = "\n\n".join(part for part in markdown_parts if part).strip()
+
+        return {
+            "barn": child_name,
+            "week": week_key,
+            "title": f"Ugeplan {week_key}",
+            "items": items,
+            "markdown": markdown or "Ingen ugeplan fundet.",
+            "url": url,
+        }
 
     def _dk_date_to_iso(self, date_str: str | None) -> str | None:
         if not date_str:
