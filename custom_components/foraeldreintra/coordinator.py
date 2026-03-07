@@ -30,14 +30,17 @@ _LOGGER = logging.getLogger(__name__)
 def _parse_times_csv(csv: str) -> list[tuple[int, int]]:
     parts = [p.strip() for p in (csv or "").split(",") if p.strip()]
     times: list[tuple[int, int]] = []
+
     for p in parts:
         if not re.match(r"^\d{2}:\d{2}$", p):
             continue
+
         hh, mm = p.split(":")
         h = int(hh)
         m = int(mm)
         if 0 <= h <= 23 and 0 <= m <= 59:
             times.append((h, m))
+
     return sorted(set(times))
 
 
@@ -45,14 +48,12 @@ class ForaldreIntraCoordinator(DataUpdateCoordinator[dict]):
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         self.entry = entry
         self.session = async_get_clientsession(hass)
-
         self.client = ForaldreIntraClient(
             session=self.session,
             username=entry.data[CONF_USERNAME],
             password=entry.data[CONF_PASSWORD],
             school_url=entry.data[CONF_SCHOOL_URL],
         )
-
         self._unsubs: list[callable] = []
 
         super().__init__(
@@ -98,16 +99,22 @@ class ForaldreIntraCoordinator(DataUpdateCoordinator[dict]):
                 self._unsubs.append(unsub)
 
         else:
-            minutes = int(self.entry.options.get(OPT_SCAN_INTERVAL_MINUTES, DEFAULT_SCAN_INTERVAL_MINUTES))
+            minutes = int(
+                self.entry.options.get(
+                    OPT_SCAN_INTERVAL_MINUTES,
+                    DEFAULT_SCAN_INTERVAL_MINUTES,
+                )
+            )
             if minutes < 1 or minutes > 1440:
                 minutes = DEFAULT_SCAN_INTERVAL_MINUTES
+
             self.update_interval = timedelta(minutes=minutes)
 
     async def _scheduled_refresh(self, now: datetime) -> None:
         self.async_request_refresh()
 
     async def async_update_options(self, new_entry: ConfigEntry) -> None:
-        # Opdater entry reference + schedule, og hent data NU (krav 7A)
+        # Opdater entry reference + schedule, og hent data NU
         self.entry = new_entry
         self._apply_schedule_from_options()
         self.async_request_refresh()
@@ -130,10 +137,12 @@ class ForaldreIntraCoordinator(DataUpdateCoordinator[dict]):
             children = await self.client.get_children()
 
         items = await self.client.get_homework_for_children(children)
+        weeklyplans = await self.client.get_weekplans_for_children(children)
 
         return {
             "children": [{"id": c.id, "name": c.name} for c in children],
             "items": items,
+            "weeklyplans": weeklyplans,
         }
 
     async def async_shutdown(self) -> None:
