@@ -111,7 +111,7 @@ def _build_markdown(items: list[dict[str, Any]]) -> str:
             continue
 
         if not fag and tekst:
-            m = re.match(r"^([A-ZÆØÅ0-9 .\-]{2,30}):\s*([\s\S]*)$", tekst)
+            m = re.match(r"^([A-ZÆØÅ0-9 .\\-]{2,30}):\\s*([\\s\\S]*)$", tekst)
             if m:
                 fag = m.group(1).strip()
                 tekst = (m.group(2) or "").strip()
@@ -128,7 +128,7 @@ def _build_markdown(items: list[dict[str, Any]]) -> str:
             t = (l.get("tekst") or "link").strip()
             u = (l.get("url") or "").strip()
             if u:
-                block += f"\n- [{t}]({u})"
+                block += f"\\n- [{t}]({u})"
 
         by_date[dato][barn][fag].append(block.strip())
 
@@ -137,19 +137,19 @@ def _build_markdown(items: list[dict[str, Any]]) -> str:
 
     for i, d_iso in enumerate(dates):
         if i > 0:
-            out += "\n\n---\n"
+            out += "\\n\\n---\\n"
 
-        out += f"{_format_header(d_iso)}\n\n"
+        out += f"{_format_header(d_iso)}\\n\\n"
 
         children = sorted(by_date[d_iso].keys())
         for child in children:
-            out += f"## {child}\n"
+            out += f"## {child}\\n"
             subjects = sorted(by_date[d_iso][child].keys())
             for subject in subjects:
-                out += f"{subject}:\n"
+                out += f"{subject}:\\n"
                 for b in by_date[d_iso][child][subject]:
-                    out += f"{b}\n\n"
-            out += "\n"
+                    out += f"{b}\\n\\n"
+            out += "\\n"
 
     return out.strip() if out.strip() else "Ingen lektier fundet."
 
@@ -161,17 +161,25 @@ async def async_setup_entry(
 ) -> None:
     coordinator: ForaldreIntraCoordinator = hass.data[DOMAIN][entry.entry_id]
     data = coordinator.data or {}
-    children = [c.get("name") for c in data.get("children", []) if c.get("name")]
-    selected_children: list[str] = entry.options.get(OPT_SELECTED_CHILDREN, children)
+
+    coordinator_children = [
+        c.get("name")
+        for c in data.get("children", [])
+        if isinstance(c, dict) and c.get("name")
+    ]
+    selected_children: list[str] = entry.options.get(OPT_SELECTED_CHILDREN, [])
+
+    child_names = coordinator_children[:]
+    for child in selected_children:
+        if child and child not in child_names:
+            child_names.append(child)
 
     entities: list[SensorEntity] = []
 
     if bool(entry.options.get(OPT_SHOW_ALL_SENSOR, DEFAULT_SHOW_ALL_SENSOR)):
         entities.append(ForaeldreIntraAllHomeworkSensor(coordinator, entry))
 
-    for child_name in children:
-        if selected_children and child_name not in set(selected_children):
-            continue
+    for child_name in child_names:
         entities.append(ForaeldreIntraChildHomeworkSensor(coordinator, entry, child_name))
         entities.append(ForaeldreIntraChildWeekplanSensor(coordinator, entry, child_name))
 
