@@ -45,7 +45,7 @@ def _parse_iso_date(s: str | None) -> date | None:
         return None
     try:
         return datetime.strptime(s, "%Y-%m-%d").date()
-    except Exception:  # noqa: BLE001
+    except Exception:
         return None
 
 
@@ -72,7 +72,6 @@ def _filter_items(entry: ConfigEntry, items: list[dict[str, Any]], child: str | 
         elif period == "future_only":
             if d is not None and d <= today:
                 continue
-        # "all": ingen filter
 
         out.append(it)
 
@@ -89,7 +88,6 @@ def _pretty_title_case(s: str) -> str:
 
 
 def _format_header(date_iso: str) -> str:
-    # date_iso: YYYY-MM-DD
     d = _parse_iso_date(date_iso)
     if not d:
         return f"# {date_iso}"
@@ -99,12 +97,7 @@ def _format_header(date_iso: str) -> str:
     return f"# {wd} d.{d.day} {DK_MONTH[d.month - 1]} {d.year}"
 
 
-def _safe(v: Any) -> str:
-    return (v or "").to_string().strip() if hasattr(v, "to_string") else str(v or "").strip()
-
-
 def _build_markdown(items: list[dict[str, Any]]) -> str:
-    # dato -> barn -> fag -> blocks
     by_date: dict[str, dict[str, dict[str, list[str]]]] = {}
 
     for it in items:
@@ -114,11 +107,9 @@ def _build_markdown(items: list[dict[str, Any]]) -> str:
         tekst = (it.get("tekst") or "").strip()
         links = it.get("links") if isinstance(it.get("links"), list) else []
 
-        # Skip tomme entries
         if not tekst and not links:
             continue
 
-        # Heuristik: udled fag fra tekststart, fx "MUSIK: ..."
         if not fag and tekst:
             m = re.match(r"^([A-ZÆØÅ0-9 .\-]{2,30}):\s*([\s\S]*)$", tekst)
             if m:
@@ -276,7 +267,9 @@ class ForaeldreIntraChildWeekplanSensor(ForaeldreIntraBaseSensor):
             "barn": self._child,
             "title": plan.get("title"),
             "week": plan.get("week"),
+            "class_or_group": plan.get("class_or_group"),
             "url": plan.get("url"),
-            "items": plan.get("items", []),
+            "general": plan.get("general", []),
+            "days": plan.get("days", []),
             "markdown": plan.get("markdown", "Ingen ugeplan fundet."),
         }
