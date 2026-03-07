@@ -133,7 +133,7 @@ class ForaldreIntraCoordinator(DataUpdateCoordinator[dict]):
             children = await self.client.get_children()
 
         items = await self.client.get_homework_for_children(children)
-        weeklyplans = await self.client.get_weekplans_for_children(children)
+        weeklyplans = {}
 
         return {
             "children": [{"id": c.id, "name": c.name} for c in children],
