@@ -12,14 +12,22 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import slugify
 
 from .const import (
-    DOMAIN,
-    OPT_SELECTED_CHILDREN,
-    OPT_DISPLAY_PERIOD,
-    OPT_ADD_MARKDOWN,
-    OPT_SHOW_ALL_SENSOR,
+    DEFAULT_ADD_HOMEWORK_MARKDOWN,
+    DEFAULT_ADD_WEEKPLAN_MARKDOWN,
     DEFAULT_DISPLAY_PERIOD,
-    DEFAULT_ADD_MARKDOWN,
-    DEFAULT_SHOW_ALL_SENSOR,
+    DEFAULT_INCLUDE_WEEKPLAN_GENERAL,
+    DEFAULT_INCLUDE_WEEKPLAN_SCHEDULE,
+    DEFAULT_SHOW_HOMEWORK_SENSORS,
+    DEFAULT_SHOW_WEEKPLAN_SENSORS,
+    DOMAIN,
+    OPT_ADD_HOMEWORK_MARKDOWN,
+    OPT_ADD_WEEKPLAN_MARKDOWN,
+    OPT_DISPLAY_PERIOD,
+    OPT_INCLUDE_WEEKPLAN_GENERAL,
+    OPT_INCLUDE_WEEKPLAN_SCHEDULE,
+    OPT_SELECTED_CHILDREN,
+    OPT_SHOW_HOMEWORK_SENSORS,
+    OPT_SHOW_WEEKPLAN_SENSORS,
 )
 from .coordinator import ForaldreIntraCoordinator
 
@@ -45,11 +53,15 @@ def _parse_iso_date(s: str | None) -> date | None:
         return None
     try:
         return datetime.strptime(s, "%Y-%m-%d").date()
-    except Exception:  # noqa: BLE001
+    except Exception:
         return None
 
 
-def _filter_items(entry: ConfigEntry, items: list[dict[str, Any]], child: str | None = None) -> list[dict[str, Any]]:
+def _filter_items(
+    entry: ConfigEntry,
+    items: list[dict[str, Any]],
+    child: str | None = None,
+) -> list[dict[str, Any]]:
     selected_children: list[str] = entry.options.get(OPT_SELECTED_CHILDREN, [])
     selected_set = set(selected_children)
     period = entry.options.get(OPT_DISPLAY_PERIOD, DEFAULT_DISPLAY_PERIOD)
@@ -72,7 +84,6 @@ def _filter_items(entry: ConfigEntry, items: list[dict[str, Any]], child: str | 
         elif period == "future_only":
             if d is not None and d <= today:
                 continue
-        # "all": ingen filter
 
         out.append(it)
 
@@ -89,7 +100,6 @@ def _pretty_title_case(s: str) -> str:
 
 
 def _format_header(date_iso: str) -> str:
-    # date_iso: YYYY-MM-DD
     d = _parse_iso_date(date_iso)
     if not d:
         return f"# {date_iso}"
@@ -99,12 +109,7 @@ def _format_header(date_iso: str) -> str:
     return f"# {wd} d.{d.day} {DK_MONTH[d.month - 1]} {d.year}"
 
 
-def _safe(v: Any) -> str:
-    return (v or "").to_string().strip() if hasattr(v, "to_string") else str(v or "").strip()
-
-
-def _build_markdown(items: list[dict[str, Any]]) -> str:
-    # dato -> barn -> fag -> blocks
+def _build_homework_markdown(items: list[dict[str, Any]]) -> str:
     by_date: dict[str, dict[str, dict[str, list[str]]]] = {}
 
     for it in items:
@@ -114,11 +119,9 @@ def _build_markdown(items: list[dict[str, Any]]) -> str:
         tekst = (it.get("tekst") or "").strip()
         links = it.get("links") if isinstance(it.get("links"), list) else []
 
-        # Skip tomme entries
         if not tekst and not links:
             continue
 
-        # Heuristik: udled fag fra tekststart, fx "MUSIK: ..."
         if not fag and tekst:
             m = re.match(r"^([A-ZÆØÅ0-9 .\-]{2,30}):\s*([\s\S]*)$", tekst)
             if m:
@@ -163,6 +166,81 @@ def _build_markdown(items: list[dict[str, Any]]) -> str:
     return out.strip() if out.strip() else "Ingen lektier fundet."
 
 
+def _build_weekplan_markdown(
+    plan: dict[str, Any],
+    include_general: bool,
+    include_schedule: bool,
+) -> str:
+    title = (plan.get("title") or "").strip()
+    items = plan.get("items") or []
+    days = plan.get("days") or []
+
+    markdown_parts: list[str] = []
+
+    if title:
+        markdown_parts.append(f"# {title}")
+
+    general_items = [x for x in items if x.get("type") == "general"]
+    if include_general and general_items:
+        markdown_parts.append("## Generelt")
+        for item in general_items:
+            subject = (item.get("subject") or "").strip()
+            if subject and subject != "Generelt":
+                markdown_parts.append(f"### {subject}")
+            if item.get("content_text"):
+                markdown_parts.append(item["content_text"])
+
+    visible_days = []
+    for day in days:
+        lesson_plans = day.get("lesson_plans") or []
+        schedule = day.get("schedule") or []
+        if lesson_plans or (include_schedule and schedule):
+            visible_days.append(day)
+
+    if include_general and general_items and visible_days:
+        markdown_parts.append("---")
+
+    for idx, day in enumerate(visible_days):
+        header = (day.get("day") or "").strip()
+        formatted_date = (day.get("formatted_date") or "").strip()
+        if formatted_date:
+            header = f"{header} {formatted_date}".strip()
+
+        if header:
+            markdown_parts.append(f"## {header}")
+
+        for lesson in day.get("lesson_plans", []):
+            subject = (lesson.get("subject") or "Generelt").strip()
+            markdown_parts.append(f"### {subject}")
+            if lesson.get("content_text"):
+                markdown_parts.append(lesson["content_text"])
+
+        if include_schedule:
+            schedule_lines: list[str] = []
+            for row in day.get("schedule", []):
+                time_str = (row.get("time") or "").strip()
+                subject_full = (row.get("subject_full") or "").strip()
+                subject_short = (row.get("subject_short") or "").strip()
+                title_str = (row.get("title") or "").strip()
+
+                label = subject_full or subject_short or title_str
+                if time_str and label:
+                    schedule_lines.append(f"- {time_str} — {label}")
+                elif time_str:
+                    schedule_lines.append(f"- {time_str}")
+                elif label:
+                    schedule_lines.append(f"- {label}")
+
+            if schedule_lines:
+                markdown_parts.append("### Skema")
+                markdown_parts.append("\n".join(schedule_lines))
+
+        if idx < len(visible_days) - 1:
+            markdown_parts.append("---")
+
+    return "\n\n".join(part for part in markdown_parts if part).strip() or "Ingen ugeplan fundet."
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -175,14 +253,25 @@ async def async_setup_entry(
 
     entities: list[SensorEntity] = []
 
-    if bool(entry.options.get(OPT_SHOW_ALL_SENSOR, DEFAULT_SHOW_ALL_SENSOR)):
+    show_homework = bool(
+        entry.options.get(OPT_SHOW_HOMEWORK_SENSORS, DEFAULT_SHOW_HOMEWORK_SENSORS)
+    )
+    show_weekplan = bool(
+        entry.options.get(OPT_SHOW_WEEKPLAN_SENSORS, DEFAULT_SHOW_WEEKPLAN_SENSORS)
+    )
+
+    if show_homework:
         entities.append(ForaeldreIntraAllHomeworkSensor(coordinator, entry))
 
     for child_name in children:
         if selected_children and child_name not in set(selected_children):
             continue
-        entities.append(ForaeldreIntraChildHomeworkSensor(coordinator, entry, child_name))
-        entities.append(ForaeldreIntraChildWeekplanSensor(coordinator, entry, child_name))
+
+        if show_homework:
+            entities.append(ForaeldreIntraChildHomeworkSensor(coordinator, entry, child_name))
+
+        if show_weekplan:
+            entities.append(ForaeldreIntraChildWeekplanSensor(coordinator, entry, child_name))
 
     async_add_entities(entities)
 
@@ -195,10 +284,6 @@ class ForaeldreIntraBaseSensor(CoordinatorEntity[ForaldreIntraCoordinator], Sens
     @property
     def available(self) -> bool:
         return self.coordinator.last_update_success
-
-    @property
-    def _add_markdown(self) -> bool:
-        return bool(self._entry.options.get(OPT_ADD_MARKDOWN, DEFAULT_ADD_MARKDOWN))
 
 
 class ForaeldreIntraAllHomeworkSensor(ForaeldreIntraBaseSensor):
@@ -221,8 +306,13 @@ class ForaeldreIntraAllHomeworkSensor(ForaeldreIntraBaseSensor):
         filtered = _filter_items(self._entry, items, child=None)
 
         attrs: dict[str, Any] = {"items": filtered}
-        if self._add_markdown:
-            attrs["markdown"] = _build_markdown(filtered)
+        if bool(
+            self._entry.options.get(
+                OPT_ADD_HOMEWORK_MARKDOWN,
+                DEFAULT_ADD_HOMEWORK_MARKDOWN,
+            )
+        ):
+            attrs["markdown"] = _build_homework_markdown(filtered)
         return attrs
 
 
@@ -247,8 +337,13 @@ class ForaeldreIntraChildHomeworkSensor(ForaeldreIntraBaseSensor):
         filtered = _filter_items(self._entry, items, child=self._child)
 
         attrs: dict[str, Any] = {"items": filtered}
-        if self._add_markdown:
-            attrs["markdown"] = _build_markdown(filtered)
+        if bool(
+            self._entry.options.get(
+                OPT_ADD_HOMEWORK_MARKDOWN,
+                DEFAULT_ADD_HOMEWORK_MARKDOWN,
+            )
+        ):
+            attrs["markdown"] = _build_homework_markdown(filtered)
         return attrs
 
 
@@ -270,13 +365,61 @@ class ForaeldreIntraChildWeekplanSensor(ForaeldreIntraBaseSensor):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         weeklyplans = (self.coordinator.data or {}).get("weeklyplans", {})
-        plan = weeklyplans.get(self._child, {})
+        plan = dict(weeklyplans.get(self._child, {}) or {})
 
-        return {
+        include_general = bool(
+            self._entry.options.get(
+                OPT_INCLUDE_WEEKPLAN_GENERAL,
+                DEFAULT_INCLUDE_WEEKPLAN_GENERAL,
+            )
+        )
+        include_schedule = bool(
+            self._entry.options.get(
+                OPT_INCLUDE_WEEKPLAN_SCHEDULE,
+                DEFAULT_INCLUDE_WEEKPLAN_SCHEDULE,
+            )
+        )
+        add_markdown = bool(
+            self._entry.options.get(
+                OPT_ADD_WEEKPLAN_MARKDOWN,
+                DEFAULT_ADD_WEEKPLAN_MARKDOWN,
+            )
+        )
+
+        attrs: dict[str, Any] = {
             "barn": self._child,
             "title": plan.get("title"),
             "week": plan.get("week"),
             "url": plan.get("url"),
-            "items": plan.get("items", []),
-            "markdown": plan.get("markdown", "Ingen ugeplan fundet."),
+            "class_or_group": plan.get("class_or_group"),
         }
+
+        items = plan.get("items", [])
+        days = plan.get("days", [])
+
+        if not include_general:
+            items = [x for x in items if x.get("type") != "general"]
+
+        if not include_schedule:
+            filtered_days = []
+            for day in days:
+                day_copy = dict(day)
+                day_copy["schedule"] = []
+                filtered_days.append(day_copy)
+            days = filtered_days
+
+        attrs["items"] = items
+        attrs["days"] = days
+
+        if add_markdown:
+            attrs["markdown"] = _build_weekplan_markdown(
+                {
+                    "title": plan.get("title"),
+                    "items": items,
+                    "days": days,
+                },
+                include_general=include_general,
+                include_schedule=include_schedule,
+            )
+
+        return attrs
