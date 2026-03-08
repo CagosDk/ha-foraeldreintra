@@ -28,15 +28,6 @@ class Child:
 class ForaldreIntraClient:
     """
     Async klient til ForældreIntra/SkoleIntra mobilsite.
-
-    Flow:
-    - GET /Account/IdpLogin (hent __RequestVerificationToken)
-    - POST credentials
-    - Find og POST SAML-form (action + hidden inputs)
-    - Land på /parent/{childId}/{childName}/...
-    - Find børn i menu + fra URL
-    - For hvert barn: hent diary, find diary_id, hent notes, parse lektier
-    - For hvert barn: prøv ugeplan for nyeste relevante uge
     """
 
     def __init__(self, session: ClientSession, username: str, password: str, school_url: str) -> None:
@@ -122,10 +113,7 @@ class ForaldreIntraClient:
         self._home_url = final_url
 
     async def get_children(self) -> list[Child]:
-        """
-        Find børn ud fra URL og menu.
-        Hvis vi ikke er logget ind, kan listen være tom.
-        """
+        """Find børn ud fra URL og menu."""
         html, url = await self._get_home_html_and_url()
         soup = BeautifulSoup(html, "html.parser")
 
@@ -135,8 +123,7 @@ class ForaldreIntraClient:
         active_match = re.search(r"/parent/(\d+)/([^/]+)/", url or "")
         if active_match:
             child_id = active_match.group(1)
-            child_name = active_match.group(2)
-            child_name = self._clean_child_name(child_name)
+            child_name = self._clean_child_name(active_match.group(2))
             key = (child_id, child_name)
             if key not in seen:
                 seen.add(key)
@@ -151,6 +138,7 @@ class ForaldreIntraClient:
                     continue
                 if "settings" in href.lower():
                     continue
+
                 child_id = m.group(1)
                 child_name = self._clean_child_name(m.group(2))
                 key = (child_id, child_name)
@@ -161,12 +149,10 @@ class ForaldreIntraClient:
         return children
 
     async def get_homework(self) -> list[dict[str, Any]]:
-        """Henter lektier for alle børn."""
         children = await self.get_children()
         return await self.get_homework_for_children(children)
 
     async def get_homework_for_children(self, children: list[Child]) -> list[dict[str, Any]]:
-        """Henter lektier for en given liste af børn."""
         all_items: list[dict[str, Any]] = []
 
         for child in children:
@@ -195,7 +181,6 @@ class ForaldreIntraClient:
         return all_items
 
     async def get_weekplans_for_children(self, children: list[Child]) -> dict[str, dict[str, Any]]:
-        """Henter nyeste ugeplan for hver elev."""
         result: dict[str, dict[str, Any]] = {}
 
         for child in children:
@@ -206,10 +191,6 @@ class ForaldreIntraClient:
         return result
 
     async def get_latest_weekplan_for_child(self, child: Child) -> dict[str, Any] | None:
-        """
-        Prøver de mest relevante uge-nøgler og returnerer den nyeste tilgængelige ugeplan.
-        Prøver næste uge først og derefter denne uge.
-        """
         child_id = child.id
         child_name = child.name
 
@@ -373,6 +354,35 @@ class ForaldreIntraClient:
                 keys.append(key)
         return keys
 
+    def _extract_weekplan_json(self, html: str) -> dict[str, Any] | None:
+        """
+        Henter JSON direkte fra data-clientlogic-settings-WeeklyPlansApp.
+        Regex bruges først, fordi BeautifulSoup ikke altid finder #root stabilt
+        i denne type HTML med meget lange attributter.
+        """
+        m = re.search(
+            r'data-clientlogic-settings-WeeklyPlansApp=\'(.*?)\'>',
+            html,
+            re.DOTALL,
+        )
+        raw: str | None = None
+
+        if m:
+            raw = m.group(1)
+        else:
+            soup = BeautifulSoup(html, "html.parser")
+            root = soup.select_one("#root")
+            if root:
+                raw = root.get("data-clientlogic-settings-WeeklyPlansApp")
+
+        if not raw:
+            return None
+
+        try:
+            return json.loads(raw)
+        except Exception:
+            return None
+
     def _parse_weekplan(
         self,
         html: str,
@@ -380,19 +390,8 @@ class ForaldreIntraClient:
         week_key: str,
         url: str,
     ) -> dict[str, Any] | None:
-        soup = BeautifulSoup(html, "html.parser")
-        root = soup.select_one("#root")
-
-        if not root:
-            return None
-
-        raw = root.get("data-clientlogic-settings-WeeklyPlansApp")
-        if not raw:
-            return None
-
-        try:
-            data = json.loads(raw)
-        except Exception:
+        data = self._extract_weekplan_json(html)
+        if not data:
             return None
 
         selected = data.get("SelectedPlan") or {}
@@ -439,7 +438,9 @@ class ForaldreIntraClient:
                     for nested in nested_lists:
                         parse_list(nested, level + 1)
 
-            top_nodes = list(frag_soup.children)
+            body = frag_soup.body or frag_soup
+            top_nodes = list(body.children)
+
             for node in top_nodes:
                 tag_name = getattr(node, "name", None)
 
@@ -467,14 +468,17 @@ class ForaldreIntraClient:
         general_plan = selected.get("GeneralPlan") or {}
         daily_plans = selected.get("DailyPlans") or []
 
-        general_items: list[dict[str, Any]] = []
+        items: list[dict[str, Any]] = []
+
         for lesson in general_plan.get("LessonPlans") or []:
             subject_obj = lesson.get("Subject") or {}
             subject = subject_obj.get("FormattedTitle") or subject_obj.get("Title") or ""
             content_html = lesson.get("Content") or ""
-
-            general_items.append(
+            items.append(
                 {
+                    "type": "general",
+                    "day": "Generelt",
+                    "date": None,
                     "subject": clean_text(subject),
                     "lesson_number": subject_obj.get("LessonNumber"),
                     "content_html": content_html,
@@ -485,19 +489,34 @@ class ForaldreIntraClient:
         days: list[dict[str, Any]] = []
         for day in daily_plans:
             lesson_plans: list[dict[str, Any]] = []
+
             for lesson in day.get("LessonPlans") or []:
                 subject_obj = lesson.get("Subject") or {}
                 subject = subject_obj.get("FormattedTitle") or subject_obj.get("Title") or ""
                 content_html = lesson.get("Content") or ""
 
-                lesson_plans.append(
+                lesson_item = {
+                    "subject": clean_text(subject),
+                    "lesson_number": subject_obj.get("LessonNumber"),
+                    "content_html": content_html,
+                    "content_text": html_to_text(content_html),
+                    "link": lesson.get("Link"),
+                    "attachments": lesson.get("Attachments") or [],
+                }
+                lesson_plans.append(lesson_item)
+
+                items.append(
                     {
-                        "subject": clean_text(subject),
-                        "lesson_number": subject_obj.get("LessonNumber"),
-                        "content_html": content_html,
-                        "content_text": html_to_text(content_html),
-                        "link": lesson.get("Link"),
-                        "attachments": lesson.get("Attachments") or [],
+                        "type": "day",
+                        "day": day.get("Day"),
+                        "date": day.get("Date"),
+                        "formatted_date": day.get("FormattedDate"),
+                        "subject": lesson_item["subject"],
+                        "lesson_number": lesson_item["lesson_number"],
+                        "content_html": lesson_item["content_html"],
+                        "content_text": lesson_item["content_text"],
+                        "link": lesson_item["link"],
+                        "attachments": lesson_item["attachments"],
                     }
                 )
 
@@ -525,19 +544,20 @@ class ForaldreIntraClient:
                 }
             )
 
-        if not general_items and not days:
+        if not items and not days:
             return None
 
         markdown_parts: list[str] = []
         title = f"Ugeplan for {class_or_group} - uge {formatted_week}" if class_or_group else f"Ugeplan {formatted_week}"
         markdown_parts.append(f"# {title}")
 
+        general_items = [x for x in items if x.get("type") == "general"]
         if general_items:
             markdown_parts.append("## Generelt")
             for item in general_items:
-                if item["subject"]:
+                if item.get("subject"):
                     markdown_parts.append(f"### {item['subject']}")
-                if item["content_text"]:
+                if item.get("content_text"):
                     markdown_parts.append(item["content_text"])
 
         for day in days:
@@ -568,13 +588,13 @@ class ForaldreIntraClient:
 
         return {
             "barn": child_name,
-            "week": formatted_week,
             "title": title,
+            "week": formatted_week,
+            "url": url,
             "class_or_group": class_or_group,
-            "general": general_items,
+            "items": items,
             "days": days,
             "markdown": markdown or "Ingen ugeplan fundet.",
-            "url": url,
         }
 
     def _dk_date_to_iso(self, date_str: str | None) -> str | None:
