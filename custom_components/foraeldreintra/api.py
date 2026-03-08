@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
+from datetime import date, timedelta
+from html import unescape
 from typing import Any
 
 from aiohttp import ClientSession
@@ -25,14 +28,6 @@ class Child:
 class ForaldreIntraClient:
     """
     Async klient til ForældreIntra/SkoleIntra mobilsite.
-
-    Flow:
-      - GET /Account/IdpLogin (hent __RequestVerificationToken)
-      - POST credentials
-      - Find og POST SAML-form (action + hidden inputs)
-      - Land på /parent/{childId}/{childName}/...
-      - Find børn i menu + fra URL
-      - For hvert barn: hent diary, find diary_id, hent notes, parse lektier
     """
 
     def __init__(self, session: ClientSession, username: str, password: str, school_url: str) -> None:
@@ -44,7 +39,6 @@ class ForaldreIntraClient:
         self._password = password
         self._base_url = school_url.rstrip("/")
         self._login_url = f"{self._base_url}/Account/IdpLogin"
-
         self._headers = {
             "User-Agent": "Mozilla/5.0 (Home Assistant ForaldreIntra)",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -111,13 +105,15 @@ class ForaldreIntraClient:
                 raise ForaldreIntraAuthError(f"SAML POST fejlede: HTTP {resp.status}")
 
         if "/parent/" not in final_url:
-            raise ForaldreIntraAuthError(f"Landede ikke på parent-side efter SAML. URL: {final_url}")
+            raise ForaldreIntraAuthError(
+                f"Landede ikke på parent-side efter SAML. URL: {final_url}"
+            )
 
         self._home_html = final_text
         self._home_url = final_url
 
     async def get_children(self) -> list[Child]:
-        """Find børn ud fra URL og menu. Hvis vi ikke er logget ind, kan listen være tom."""
+        """Find børn ud fra URL og menu."""
         html, url = await self._get_home_html_and_url()
         soup = BeautifulSoup(html, "html.parser")
 
@@ -127,8 +123,7 @@ class ForaldreIntraClient:
         active_match = re.search(r"/parent/(\d+)/([^/]+)/", url or "")
         if active_match:
             child_id = active_match.group(1)
-            child_name = active_match.group(2)
-            child_name = self._clean_child_name(child_name)
+            child_name = self._clean_child_name(active_match.group(2))
             key = (child_id, child_name)
             if key not in seen:
                 seen.add(key)
@@ -143,6 +138,7 @@ class ForaldreIntraClient:
                     continue
                 if "settings" in href.lower():
                     continue
+
                 child_id = m.group(1)
                 child_name = self._clean_child_name(m.group(2))
                 key = (child_id, child_name)
@@ -153,12 +149,10 @@ class ForaldreIntraClient:
         return children
 
     async def get_homework(self) -> list[dict[str, Any]]:
-        """Henter lektier for alle børn."""
         children = await self.get_children()
         return await self.get_homework_for_children(children)
 
     async def get_homework_for_children(self, children: list[Child]) -> list[dict[str, Any]]:
-        """Henter lektier for en given liste af børn (så vi undgår dobbelt get_children())."""
         all_items: list[dict[str, Any]] = []
 
         for child in children:
@@ -178,7 +172,6 @@ class ForaldreIntraClient:
             notes_text = await self._get_text(notes_url)
 
             parsed = self._parse_homework_notes(notes_text)
-
             for item in parsed:
                 item["barn"] = child_name
                 item["dato"] = self._dk_date_to_iso(item.get("dato"))
@@ -186,6 +179,42 @@ class ForaldreIntraClient:
 
         all_items.sort(key=lambda x: (x.get("dato") or "", x.get("barn") or "", x.get("fag") or ""))
         return all_items
+
+    async def get_weekplans_for_children(self, children: list[Child]) -> dict[str, dict[str, Any]]:
+        result: dict[str, dict[str, Any]] = {}
+
+        for child in children:
+            plan = await self.get_latest_weekplan_for_child(child)
+            if plan:
+                result[child.name] = plan
+
+        return result
+
+    async def get_latest_weekplan_for_child(self, child: Child) -> dict[str, Any] | None:
+        child_id = child.id
+        child_name = child.name
+
+        for week_key in self._candidate_week_keys():
+            url = (
+                f"{self._base_url}/parent/"
+                f"{child_id}/{child_name}item/weeklyplansandhomework/item/class/{week_key}"
+            )
+
+            try:
+                html = await self._get_text(url)
+            except ForaldreIntraError:
+                continue
+
+            parsed = self._parse_weekplan(
+                html=html,
+                child_name=child_name,
+                week_key=week_key,
+                url=url,
+            )
+            if parsed:
+                return parsed
+
+        return None
 
     async def _get_home_html_and_url(self) -> tuple[str, str]:
         if self._home_html and self._home_url:
@@ -218,7 +247,6 @@ class ForaldreIntraClient:
         return None
 
     def _clean_child_name(self, name: str) -> str:
-        # I nogle flows kan navnet i URL blive "Nameitem" – vi fjerner "item" suffix hvis det sker.
         n = (name or "").strip()
         if n.lower().endswith("item"):
             n = n[:-4]
@@ -229,7 +257,9 @@ class ForaldreIntraClient:
         result: list[dict[str, Any]] = []
 
         def clean_text(txt: str) -> str:
-            return (txt or "").replace("\xa0", " ").strip()
+            txt = (txt or "").replace("\xa0", " ").strip()
+            txt = re.sub(r"\s+", " ", txt)
+            return txt.strip()
 
         def normalize_subject(s: str) -> str:
             s = (s or "").strip().replace(":", "")
@@ -244,6 +274,7 @@ class ForaldreIntraClient:
         for li in soup.select("ul.sk-list > li"):
             dato_tag = li.select_one("div.sk-white-box > b")
             content_div = li.select_one("div.sk-user-input")
+
             if not dato_tag or not content_div:
                 continue
 
@@ -282,13 +313,11 @@ class ForaldreIntraClient:
             for fag, data in blocks.items():
                 lines = data.get("lines") or []
                 links = data.get("links") or []
-
                 tekst = "\n".join([clean_text(x) for x in lines if clean_text(x)]).strip()
 
                 if not tekst and not links:
                     continue
 
-                # Fallback: udled fag fra "MUSIK: ..." hvis fag mangler
                 if (not fag or not str(fag).strip()) and tekst:
                     first_line = tekst.splitlines()[0].strip()
                     m = re.match(r"^([A-Za-zÆØÅæøå ]{2,30})\s*:\s*(.+)$", first_line)
@@ -311,6 +340,307 @@ class ForaldreIntraClient:
                 )
 
         return result
+
+    def _week_key_for_date(self, d: date) -> str:
+        iso_year, iso_week, _ = d.isocalendar()
+        return f"{iso_week:02d}-{iso_year}"
+
+    def _candidate_week_keys(self) -> list[str]:
+        today = date.today()
+        current_week = self._week_key_for_date(today)
+        next_week = self._week_key_for_date(today + timedelta(days=7))
+
+        keys: list[str] = []
+        for key in [next_week, current_week]:
+            if key not in keys:
+                keys.append(key)
+        return keys
+
+    def _extract_weekplan_json(self, html: str) -> dict[str, Any] | None:
+        m = re.search(
+            r"data-clientlogic-settings-WeeklyPlansApp='(.*?)'>",
+            html,
+            re.DOTALL,
+        )
+        raw: str | None = None
+
+        if m:
+            raw = m.group(1)
+        else:
+            soup = BeautifulSoup(html, "html.parser")
+            root = soup.select_one("#root")
+            if root:
+                raw = root.get("data-clientlogic-settings-WeeklyPlansApp")
+
+        if not raw:
+            return None
+
+        try:
+            return json.loads(raw)
+        except Exception:
+            return None
+
+    def _parse_weekplan(
+        self,
+        html: str,
+        child_name: str,
+        week_key: str,
+        url: str,
+    ) -> dict[str, Any] | None:
+        data = self._extract_weekplan_json(html)
+        if not data:
+            return None
+
+        selected = data.get("SelectedPlan") or {}
+        if not selected:
+            return None
+
+        def clean_text(txt: str) -> str:
+            txt = (txt or "").replace("\xa0", " ").strip()
+            txt = re.sub(r"\s+", " ", txt)
+            return txt.strip()
+
+        def display_subject(subject: str) -> str:
+            subject = clean_text(subject)
+            return subject if subject else "Generelt"
+
+        def html_to_text(fragment: str) -> str:
+            if not fragment:
+                return ""
+
+            fragment = unescape(fragment)
+            frag_soup = BeautifulSoup(fragment, "html.parser")
+
+            for br in frag_soup.find_all("br"):
+                br.replace_with("\n")
+
+            lines: list[str] = []
+
+            def append_line(text: str) -> None:
+                cleaned = clean_text(text)
+                if cleaned:
+                    lines.append(cleaned)
+
+            def parse_list(list_tag: Any, level: int = 0) -> None:
+                for li in list_tag.find_all("li", recursive=False):
+                    text_parts: list[str] = []
+                    nested_lists: list[Any] = []
+
+                    for child in li.children:
+                        child_tag_name = getattr(child, "name", None)
+                        if child_tag_name in ("ul", "ol"):
+                            nested_lists.append(child)
+                        else:
+                            if hasattr(child, "get_text"):
+                                piece = clean_text(child.get_text(" ", strip=True))
+                            else:
+                                piece = clean_text(str(child))
+                            if piece:
+                                text_parts.append(piece)
+
+                    line = clean_text(" ".join(text_parts))
+                    if line:
+                        indent = "  " * level
+                        lines.append(f"{indent}• {line}")
+
+                    for nested in nested_lists:
+                        parse_list(nested, level + 1)
+
+            body = frag_soup.body or frag_soup
+            for node in body.children:
+                tag_name = getattr(node, "name", None)
+
+                if tag_name in ("ul", "ol"):
+                    parse_list(node, 0)
+                    continue
+
+                if tag_name in ("p", "div"):
+                    append_line(node.get_text(" ", strip=True))
+                    continue
+
+                if hasattr(node, "get_text"):
+                    append_line(node.get_text(" ", strip=True))
+                else:
+                    append_line(str(node))
+
+            if not lines:
+                txt = clean_text(frag_soup.get_text("\n", strip=True))
+                if txt:
+                    lines = [clean_text(line) for line in txt.splitlines() if clean_text(line)]
+
+            return "\n".join(line for line in lines if line).strip()
+
+        def format_schedule_line(row: dict[str, Any]) -> str:
+            time_str = clean_text(row.get("time") or "")
+            subject_full = clean_text(row.get("subject_full") or "")
+            subject_short = clean_text(row.get("subject_short") or "")
+            title_str = clean_text(row.get("title") or "")
+
+            label = subject_full or subject_short or title_str
+
+            if title_str and label and title_str != label:
+                title_upper = title_str.upper()
+                subject_short_upper = subject_short.upper()
+                if not (
+                    subject_short_upper
+                    and f" {subject_short_upper} " in f" {title_upper} "
+                ):
+                    if title_str not in label:
+                        label = f"{label} ({title_str})"
+
+            if time_str and label:
+                return f"- {time_str} — {label}"
+            if time_str:
+                return f"- {time_str}"
+            if label:
+                return f"- {label}"
+            return ""
+
+        formatted_week = selected.get("FormattedWeek") or week_key
+        class_or_group = selected.get("ClassOrGroup")
+        general_plan = selected.get("GeneralPlan") or {}
+        daily_plans = selected.get("DailyPlans") or []
+
+        items: list[dict[str, Any]] = []
+
+        for lesson in general_plan.get("LessonPlans") or []:
+            subject_obj = lesson.get("Subject") or {}
+            subject = display_subject(
+                subject_obj.get("FormattedTitle") or subject_obj.get("Title") or ""
+            )
+            content_html = lesson.get("Content") or ""
+            items.append(
+                {
+                    "type": "general",
+                    "day": "Generelt",
+                    "date": None,
+                    "subject": subject,
+                    "lesson_number": subject_obj.get("LessonNumber"),
+                    "content_html": content_html,
+                    "content_text": html_to_text(content_html),
+                }
+            )
+
+        days: list[dict[str, Any]] = []
+        for day in daily_plans:
+            lesson_plans: list[dict[str, Any]] = []
+
+            for lesson in day.get("LessonPlans") or []:
+                subject_obj = lesson.get("Subject") or {}
+                subject = display_subject(
+                    subject_obj.get("FormattedTitle") or subject_obj.get("Title") or ""
+                )
+                content_html = lesson.get("Content") or ""
+
+                lesson_item = {
+                    "subject": subject,
+                    "lesson_number": subject_obj.get("LessonNumber"),
+                    "content_html": content_html,
+                    "content_text": html_to_text(content_html),
+                    "link": lesson.get("Link"),
+                    "attachments": lesson.get("Attachments") or [],
+                }
+                lesson_plans.append(lesson_item)
+
+                items.append(
+                    {
+                        "type": "day",
+                        "day": day.get("Day"),
+                        "date": day.get("Date"),
+                        "formatted_date": day.get("FormattedDate"),
+                        "subject": lesson_item["subject"],
+                        "lesson_number": lesson_item["lesson_number"],
+                        "content_html": lesson_item["content_html"],
+                        "content_text": lesson_item["content_text"],
+                        "link": lesson_item["link"],
+                        "attachments": lesson_item["attachments"],
+                    }
+                )
+
+            schedule_items: list[dict[str, Any]] = []
+            for sched in day.get("Schedule") or []:
+                schedule_items.append(
+                    {
+                        "time": sched.get("TimeString"),
+                        "title": sched.get("Title"),
+                        "class_name": sched.get("ClassName"),
+                        "subject_short": sched.get("ShortSubjectTitle"),
+                        "subject_full": sched.get("FullSubjectTitle"),
+                        "lesson_number": sched.get("LessonNumber"),
+                    }
+                )
+
+            days.append(
+                {
+                    "date": day.get("Date"),
+                    "day": day.get("Day"),
+                    "formatted_date": day.get("FormattedDate"),
+                    "long_formatted_date": day.get("LongFormattedDate"),
+                    "lesson_plans": lesson_plans,
+                    "schedule": schedule_items,
+                }
+            )
+
+        if not items and not days:
+            return None
+
+        markdown_parts: list[str] = []
+        title = f"Ugeplan for {class_or_group} - uge {formatted_week}" if class_or_group else f"Ugeplan {formatted_week}"
+        markdown_parts.append(f"# {title}")
+
+        general_items = [x for x in items if x.get("type") == "general"]
+        if general_items:
+            markdown_parts.append("## Generelt")
+            for item in general_items:
+                subject = display_subject(item.get("subject") or "")
+                if subject != "Generelt":
+                    markdown_parts.append(f"### {subject}")
+                if item.get("content_text"):
+                    markdown_parts.append(item["content_text"])
+
+        if general_items and days:
+            markdown_parts.append("---")
+
+        for idx, day in enumerate(days):
+            header = clean_text(day.get("day") or "")
+            if day.get("formatted_date"):
+                header = f"{header} {clean_text(day['formatted_date'])}".strip()
+
+            if header:
+                markdown_parts.append(f"## {header}")
+
+            for lesson in day.get("lesson_plans", []):
+                subject = display_subject(lesson.get("subject") or "")
+                markdown_parts.append(f"### {subject}")
+                if lesson.get("content_text"):
+                    markdown_parts.append(lesson["content_text"])
+
+            schedule = day.get("schedule") or []
+            schedule_lines: list[str] = []
+            for row in schedule:
+                line = format_schedule_line(row)
+                if line:
+                    schedule_lines.append(line)
+
+            if schedule_lines:
+                markdown_parts.append("### Skema")
+                markdown_parts.append("\n".join(schedule_lines))
+
+            if idx < len(days) - 1:
+                markdown_parts.append("---")
+
+        markdown = "\n\n".join(part for part in markdown_parts if part).strip()
+
+        return {
+            "barn": child_name,
+            "title": title,
+            "week": formatted_week,
+            "url": url,
+            "class_or_group": class_or_group,
+            "items": items,
+            "days": days,
+            "markdown": markdown or "Ingen ugeplan fundet.",
+        }
 
     def _dk_date_to_iso(self, date_str: str | None) -> str | None:
         if not date_str:

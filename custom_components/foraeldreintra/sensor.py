@@ -23,9 +23,21 @@ from .const import (
 )
 from .coordinator import ForaldreIntraCoordinator
 
-
 DK_WEEKDAY = ["Søndag", "Mandag", "Tirsdag", "Onsdag", "Torsdag", "Fredag", "Lørdag"]
-DK_MONTH = ["januar", "februar", "marts", "april", "maj", "juni", "juli", "august", "september", "oktober", "november", "december"]
+DK_MONTH = [
+    "januar",
+    "februar",
+    "marts",
+    "april",
+    "maj",
+    "juni",
+    "juli",
+    "august",
+    "september",
+    "oktober",
+    "november",
+    "december",
+]
 
 
 def _parse_iso_date(s: str | None) -> date | None:
@@ -40,11 +52,11 @@ def _parse_iso_date(s: str | None) -> date | None:
 def _filter_items(entry: ConfigEntry, items: list[dict[str, Any]], child: str | None = None) -> list[dict[str, Any]]:
     selected_children: list[str] = entry.options.get(OPT_SELECTED_CHILDREN, [])
     selected_set = set(selected_children)
-
     period = entry.options.get(OPT_DISPLAY_PERIOD, DEFAULT_DISPLAY_PERIOD)
     today = date.today()
 
     out: list[dict[str, Any]] = []
+
     for it in items:
         barn = (it.get("barn") or "").strip()
 
@@ -54,7 +66,6 @@ def _filter_items(entry: ConfigEntry, items: list[dict[str, Any]], child: str | 
             continue
 
         d = _parse_iso_date(it.get("dato"))
-
         if period == "today_and_future":
             if d is not None and d < today:
                 continue
@@ -81,15 +92,11 @@ def _format_header(date_iso: str) -> str:
     # date_iso: YYYY-MM-DD
     d = _parse_iso_date(date_iso)
     if not d:
-        return f"# <u>{date_iso}</u>"
-    wd = DK_WEEKDAY[d.weekday() + 1 if d.weekday() < 6 else 0]  # python: Mon=0..Sun=6
-    # For at undgå bøvl, brug datetime til weekday korrekt:
-    dt = datetime(d.year, d.month, d.day)
-    wd = DK_WEEKDAY[dt.weekday() + 1 if dt.weekday() < 6 else 0]  # samme som ovenfor
-    # Mere robust:
-    wd = DK_WEEKDAY[(dt.weekday() + 1) % 7]  # Mandag->1 => "Mandag" ved index 1
+        return f"# {date_iso}"
 
-    return f"# <u>{wd} d.{d.day} {DK_MONTH[d.month - 1]} {d.year}</u>"
+    dt = datetime(d.year, d.month, d.day)
+    wd = DK_WEEKDAY[(dt.weekday() + 1) % 7]
+    return f"# {wd} d.{d.day} {DK_MONTH[d.month - 1]} {d.year}"
 
 
 def _safe(v: Any) -> str:
@@ -97,13 +104,12 @@ def _safe(v: Any) -> str:
 
 
 def _build_markdown(items: list[dict[str, Any]]) -> str:
-    # Node-RED format: dato -> barn -> fag -> blocks
+    # dato -> barn -> fag -> blocks
     by_date: dict[str, dict[str, dict[str, list[str]]]] = {}
 
     for it in items:
         dato = (it.get("dato") or "").strip()
         barn = (it.get("barn") or "").strip() or "Ukendt"
-
         fag = (it.get("fag") or "").strip()
         tekst = (it.get("tekst") or "").strip()
         links = it.get("links") if isinstance(it.get("links"), list) else []
@@ -136,11 +142,12 @@ def _build_markdown(items: list[dict[str, Any]]) -> str:
         by_date[dato][barn][fag].append(block.strip())
 
     dates = sorted([d for d in by_date.keys() if d])
-
     out = ""
+
     for i, d_iso in enumerate(dates):
         if i > 0:
             out += "\n\n---\n"
+
         out += f"{_format_header(d_iso)}\n\n"
 
         children = sorted(by_date[d_iso].keys())
@@ -148,10 +155,10 @@ def _build_markdown(items: list[dict[str, Any]]) -> str:
             out += f"## {child}\n"
             subjects = sorted(by_date[d_iso][child].keys())
             for subject in subjects:
-                out += f"<u>{subject}:</u>\n"
+                out += f"{subject}:\n"
                 for b in by_date[d_iso][child][subject]:
                     out += f"{b}\n\n"
-                out += "\n"
+            out += "\n"
 
     return out.strip() if out.strip() else "Ingen lektier fundet."
 
@@ -164,7 +171,6 @@ async def async_setup_entry(
     coordinator: ForaldreIntraCoordinator = hass.data[DOMAIN][entry.entry_id]
     data = coordinator.data or {}
     children = [c.get("name") for c in data.get("children", []) if c.get("name")]
-
     selected_children: list[str] = entry.options.get(OPT_SELECTED_CHILDREN, children)
 
     entities: list[SensorEntity] = []
@@ -176,6 +182,7 @@ async def async_setup_entry(
         if selected_children and child_name not in set(selected_children):
             continue
         entities.append(ForaeldreIntraChildHomeworkSensor(coordinator, entry, child_name))
+        entities.append(ForaeldreIntraChildWeekplanSensor(coordinator, entry, child_name))
 
     async_add_entities(entities)
 
@@ -212,6 +219,7 @@ class ForaeldreIntraAllHomeworkSensor(ForaeldreIntraBaseSensor):
     def extra_state_attributes(self) -> dict[str, Any]:
         items = (self.coordinator.data or {}).get("items", [])
         filtered = _filter_items(self._entry, items, child=None)
+
         attrs: dict[str, Any] = {"items": filtered}
         if self._add_markdown:
             attrs["markdown"] = _build_markdown(filtered)
@@ -237,7 +245,38 @@ class ForaeldreIntraChildHomeworkSensor(ForaeldreIntraBaseSensor):
     def extra_state_attributes(self) -> dict[str, Any]:
         items = (self.coordinator.data or {}).get("items", [])
         filtered = _filter_items(self._entry, items, child=self._child)
+
         attrs: dict[str, Any] = {"items": filtered}
         if self._add_markdown:
             attrs["markdown"] = _build_markdown(filtered)
         return attrs
+
+
+class ForaeldreIntraChildWeekplanSensor(ForaeldreIntraBaseSensor):
+    _attr_icon = "mdi:calendar-text"
+
+    def __init__(self, coordinator: ForaldreIntraCoordinator, entry: ConfigEntry, child_name: str) -> None:
+        super().__init__(coordinator, entry)
+        self._child = child_name
+        self._attr_name = f"ForældreIntra ugeplan ({child_name})"
+        self._attr_unique_id = f"{entry.entry_id}_weekplan_{slugify(child_name)}"
+
+    @property
+    def native_value(self) -> str:
+        weeklyplans = (self.coordinator.data or {}).get("weeklyplans", {})
+        plan = weeklyplans.get(self._child, {})
+        return plan.get("week") or "ingen"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        weeklyplans = (self.coordinator.data or {}).get("weeklyplans", {})
+        plan = weeklyplans.get(self._child, {})
+
+        return {
+            "barn": self._child,
+            "title": plan.get("title"),
+            "week": plan.get("week"),
+            "url": plan.get("url"),
+            "items": plan.get("items", []),
+            "markdown": plan.get("markdown", "Ingen ugeplan fundet."),
+        }
