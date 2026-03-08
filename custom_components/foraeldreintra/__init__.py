@@ -12,6 +12,11 @@ from .const import (
 from .coordinator import ForaldreIntraCoordinator
 
 
+async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+    hass.data.setdefault(DOMAIN, {})
+    return True
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = ForaldreIntraCoordinator(hass, entry)
     await coordinator.async_config_entry_first_refresh()
