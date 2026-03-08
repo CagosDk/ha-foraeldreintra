@@ -257,7 +257,9 @@ class ForaldreIntraClient:
         result: list[dict[str, Any]] = []
 
         def clean_text(txt: str) -> str:
-            return (txt or "").replace("\xa0", " ").strip()
+            txt = (txt or "").replace("\xa0", " ").strip()
+            txt = re.sub(r"\s+", " ", txt)
+            return txt.strip()
 
         def normalize_subject(s: str) -> str:
             s = (s or "").strip().replace(":", "")
@@ -355,13 +357,8 @@ class ForaldreIntraClient:
         return keys
 
     def _extract_weekplan_json(self, html: str) -> dict[str, Any] | None:
-        """
-        Henter JSON direkte fra data-clientlogic-settings-WeeklyPlansApp.
-        Regex bruges først, fordi BeautifulSoup ikke altid finder #root stabilt
-        i denne type HTML med meget lange attributter.
-        """
         m = re.search(
-            r'data-clientlogic-settings-WeeklyPlansApp=\'(.*?)\'>',
+            r"data-clientlogic-settings-WeeklyPlansApp='(.*?)'>",
             html,
             re.DOTALL,
         )
@@ -399,7 +396,13 @@ class ForaldreIntraClient:
             return None
 
         def clean_text(txt: str) -> str:
-            return (txt or "").replace("\xa0", " ").strip()
+            txt = (txt or "").replace("\xa0", " ").strip()
+            txt = re.sub(r"\s+", " ", txt)
+            return txt.strip()
+
+        def display_subject(subject: str) -> str:
+            subject = clean_text(subject)
+            return subject if subject else "Generelt"
 
         def html_to_text(fragment: str) -> str:
             if not fragment:
@@ -412,6 +415,11 @@ class ForaldreIntraClient:
                 br.replace_with("\n")
 
             lines: list[str] = []
+
+            def append_line(text: str) -> None:
+                cleaned = clean_text(text)
+                if cleaned:
+                    lines.append(cleaned)
 
             def parse_list(list_tag: Any, level: int = 0) -> None:
                 for li in list_tag.find_all("li", recursive=False):
@@ -439,22 +447,21 @@ class ForaldreIntraClient:
                         parse_list(nested, level + 1)
 
             body = frag_soup.body or frag_soup
-            top_nodes = list(body.children)
-
-            for node in top_nodes:
+            for node in body.children:
                 tag_name = getattr(node, "name", None)
 
                 if tag_name in ("ul", "ol"):
                     parse_list(node, 0)
                     continue
 
-                if hasattr(node, "get_text"):
-                    txt = clean_text(node.get_text(" ", strip=True))
-                else:
-                    txt = clean_text(str(node))
+                if tag_name in ("p", "div"):
+                    append_line(node.get_text(" ", strip=True))
+                    continue
 
-                if txt:
-                    lines.append(txt)
+                if hasattr(node, "get_text"):
+                    append_line(node.get_text(" ", strip=True))
+                else:
+                    append_line(str(node))
 
             if not lines:
                 txt = clean_text(frag_soup.get_text("\n", strip=True))
@@ -462,6 +469,32 @@ class ForaldreIntraClient:
                     lines = [clean_text(line) for line in txt.splitlines() if clean_text(line)]
 
             return "\n".join(line for line in lines if line).strip()
+
+        def format_schedule_line(row: dict[str, Any]) -> str:
+            time_str = clean_text(row.get("time") or "")
+            subject_full = clean_text(row.get("subject_full") or "")
+            subject_short = clean_text(row.get("subject_short") or "")
+            title_str = clean_text(row.get("title") or "")
+
+            label = subject_full or subject_short or title_str
+
+            if title_str and label and title_str != label:
+                title_upper = title_str.upper()
+                subject_short_upper = subject_short.upper()
+                if not (
+                    subject_short_upper
+                    and f" {subject_short_upper} " in f" {title_upper} "
+                ):
+                    if title_str not in label:
+                        label = f"{label} ({title_str})"
+
+            if time_str and label:
+                return f"- {time_str} — {label}"
+            if time_str:
+                return f"- {time_str}"
+            if label:
+                return f"- {label}"
+            return ""
 
         formatted_week = selected.get("FormattedWeek") or week_key
         class_or_group = selected.get("ClassOrGroup")
@@ -472,14 +505,16 @@ class ForaldreIntraClient:
 
         for lesson in general_plan.get("LessonPlans") or []:
             subject_obj = lesson.get("Subject") or {}
-            subject = subject_obj.get("FormattedTitle") or subject_obj.get("Title") or ""
+            subject = display_subject(
+                subject_obj.get("FormattedTitle") or subject_obj.get("Title") or ""
+            )
             content_html = lesson.get("Content") or ""
             items.append(
                 {
                     "type": "general",
                     "day": "Generelt",
                     "date": None,
-                    "subject": clean_text(subject),
+                    "subject": subject,
                     "lesson_number": subject_obj.get("LessonNumber"),
                     "content_html": content_html,
                     "content_text": html_to_text(content_html),
@@ -492,11 +527,13 @@ class ForaldreIntraClient:
 
             for lesson in day.get("LessonPlans") or []:
                 subject_obj = lesson.get("Subject") or {}
-                subject = subject_obj.get("FormattedTitle") or subject_obj.get("Title") or ""
+                subject = display_subject(
+                    subject_obj.get("FormattedTitle") or subject_obj.get("Title") or ""
+                )
                 content_html = lesson.get("Content") or ""
 
                 lesson_item = {
-                    "subject": clean_text(subject),
+                    "subject": subject,
                     "lesson_number": subject_obj.get("LessonNumber"),
                     "content_html": content_html,
                     "content_text": html_to_text(content_html),
@@ -555,34 +592,42 @@ class ForaldreIntraClient:
         if general_items:
             markdown_parts.append("## Generelt")
             for item in general_items:
-                if item.get("subject"):
-                    markdown_parts.append(f"### {item['subject']}")
+                subject = display_subject(item.get("subject") or "")
+                if subject != "Generelt":
+                    markdown_parts.append(f"### {subject}")
                 if item.get("content_text"):
                     markdown_parts.append(item["content_text"])
 
-        for day in days:
-            header = day.get("day") or ""
+        if general_items and days:
+            markdown_parts.append("---")
+
+        for idx, day in enumerate(days):
+            header = clean_text(day.get("day") or "")
             if day.get("formatted_date"):
-                header = f"{header} {day['formatted_date']}".strip()
+                header = f"{header} {clean_text(day['formatted_date'])}".strip()
 
             if header:
                 markdown_parts.append(f"## {header}")
 
             for lesson in day.get("lesson_plans", []):
-                subject = lesson.get("subject") or "Ukendt fag"
+                subject = display_subject(lesson.get("subject") or "")
                 markdown_parts.append(f"### {subject}")
                 if lesson.get("content_text"):
                     markdown_parts.append(lesson["content_text"])
 
             schedule = day.get("schedule") or []
-            if schedule:
-                schedule_lines = ["### Skema"]
-                for row in schedule:
-                    time_str = row.get("time") or ""
-                    title_str = row.get("title") or ""
-                    if time_str or title_str:
-                        schedule_lines.append(f"- {time_str} — {title_str}")
+            schedule_lines: list[str] = []
+            for row in schedule:
+                line = format_schedule_line(row)
+                if line:
+                    schedule_lines.append(line)
+
+            if schedule_lines:
+                markdown_parts.append("### Skema")
                 markdown_parts.append("\n".join(schedule_lines))
+
+            if idx < len(days) - 1:
+                markdown_parts.append("---")
 
         markdown = "\n\n".join(part for part in markdown_parts if part).strip()
 
