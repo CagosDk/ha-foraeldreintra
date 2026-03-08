@@ -1,35 +1,43 @@
 from __future__ import annotations
 
 import re
-import voluptuous as vol
 
+import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers import selector
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .api import ForaldreIntraClient, ForaldreIntraAuthError, ForaldreIntraError
+from .api import ForaldreIntraAuthError, ForaldreIntraClient, ForaldreIntraError
 from .const import (
-    DOMAIN,
+    CONF_PASSWORD,
     CONF_SCHOOL_URL,
     CONF_USERNAME,
-    CONF_PASSWORD,
-    OPT_SELECTED_CHILDREN,
-    OPT_DISPLAY_PERIOD,
-    OPT_ADD_MARKDOWN,
-    OPT_SHOW_ALL_SENSOR,
-    OPT_AUTO_REMOVE_UNSELECTED,
-    OPT_SCAN_MODE,
-    OPT_SCAN_INTERVAL_MINUTES,
-    OPT_SCAN_TIMES,
-    DEFAULT_DISPLAY_PERIOD,
-    DEFAULT_ADD_MARKDOWN,
-    DEFAULT_SHOW_ALL_SENSOR,
+    DEFAULT_ADD_HOMEWORK_MARKDOWN,
+    DEFAULT_ADD_WEEKPLAN_MARKDOWN,
     DEFAULT_AUTO_REMOVE_UNSELECTED,
-    DEFAULT_SCAN_MODE,
+    DEFAULT_DISPLAY_PERIOD,
+    DEFAULT_INCLUDE_WEEKPLAN_GENERAL,
+    DEFAULT_INCLUDE_WEEKPLAN_SCHEDULE,
     DEFAULT_SCAN_INTERVAL_MINUTES,
+    DEFAULT_SCAN_MODE,
     DEFAULT_SCAN_TIMES,
+    DEFAULT_SHOW_HOMEWORK_SENSORS,
+    DEFAULT_SHOW_WEEKPLAN_SENSORS,
+    DOMAIN,
+    OPT_ADD_HOMEWORK_MARKDOWN,
+    OPT_ADD_WEEKPLAN_MARKDOWN,
+    OPT_AUTO_REMOVE_UNSELECTED,
+    OPT_DISPLAY_PERIOD,
+    OPT_INCLUDE_WEEKPLAN_GENERAL,
+    OPT_INCLUDE_WEEKPLAN_SCHEDULE,
+    OPT_SCAN_INTERVAL_MINUTES,
+    OPT_SCAN_MODE,
+    OPT_SCAN_TIMES,
+    OPT_SELECTED_CHILDREN,
+    OPT_SHOW_HOMEWORK_SENSORS,
+    OPT_SHOW_WEEKPLAN_SENSORS,
 )
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
@@ -49,12 +57,10 @@ async def _validate_input(hass: HomeAssistant, data: dict) -> dict:
         password=data[CONF_PASSWORD],
         school_url=data[CONF_SCHOOL_URL],
     )
-
     await client.login()
     children = await client.get_children()
     if not children:
         raise ForaldreIntraError("Ingen børn fundet efter login")
-
     return {"title": "ForældreIntra"}
 
 
@@ -77,13 +83,19 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["base"] = "auth"
             except ForaldreIntraError:
                 errors["base"] = "cannot_connect"
-            except Exception:  # noqa: BLE001
+            except Exception:
                 errors["base"] = "unknown"
 
-        return self.async_show_form(step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors)
+        return self.async_show_form(
+            step_id="user",
+            data_schema=STEP_USER_DATA_SCHEMA,
+            errors=errors,
+        )
 
     @staticmethod
-    def async_get_options_flow(config_entry: config_entries.ConfigEntry) -> config_entries.OptionsFlow:
+    def async_get_options_flow(
+        config_entry: config_entries.ConfigEntry,
+    ) -> config_entries.OptionsFlow:
         return OptionsFlowHandler(config_entry)
 
 
@@ -95,34 +107,65 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
     async def async_step_init(self, user_input: dict | None = None) -> FlowResult:
         errors: dict[str, str] = {}
 
-        # Hent børn (fail-safe)
         try:
             self._children = await self._fetch_children_names()
-        except Exception:  # noqa: BLE001
+        except Exception:
             self._children = []
 
         existing = self.entry.options
 
-        # Default: alle børn valgt (hvis vi kender dem)
         selected_default = existing.get(OPT_SELECTED_CHILDREN)
         if (selected_default is None or selected_default == []) and self._children:
             selected_default = list(self._children)
 
         display_default = existing.get(OPT_DISPLAY_PERIOD, DEFAULT_DISPLAY_PERIOD)
-        markdown_default = bool(existing.get(OPT_ADD_MARKDOWN, DEFAULT_ADD_MARKDOWN))
 
-        show_all_default = bool(existing.get(OPT_SHOW_ALL_SENSOR, DEFAULT_SHOW_ALL_SENSOR))
-        auto_remove_default = bool(existing.get(OPT_AUTO_REMOVE_UNSELECTED, DEFAULT_AUTO_REMOVE_UNSELECTED))
+        show_homework_default = bool(
+            existing.get(OPT_SHOW_HOMEWORK_SENSORS, DEFAULT_SHOW_HOMEWORK_SENSORS)
+        )
+        add_homework_markdown_default = bool(
+            existing.get(OPT_ADD_HOMEWORK_MARKDOWN, DEFAULT_ADD_HOMEWORK_MARKDOWN)
+        )
+
+        show_weekplan_default = bool(
+            existing.get(OPT_SHOW_WEEKPLAN_SENSORS, DEFAULT_SHOW_WEEKPLAN_SENSORS)
+        )
+        add_weekplan_markdown_default = bool(
+            existing.get(OPT_ADD_WEEKPLAN_MARKDOWN, DEFAULT_ADD_WEEKPLAN_MARKDOWN)
+        )
+        include_weekplan_schedule_default = bool(
+            existing.get(
+                OPT_INCLUDE_WEEKPLAN_SCHEDULE,
+                DEFAULT_INCLUDE_WEEKPLAN_SCHEDULE,
+            )
+        )
+        include_weekplan_general_default = bool(
+            existing.get(
+                OPT_INCLUDE_WEEKPLAN_GENERAL,
+                DEFAULT_INCLUDE_WEEKPLAN_GENERAL,
+            )
+        )
+
+        auto_remove_default = bool(
+            existing.get(OPT_AUTO_REMOVE_UNSELECTED, DEFAULT_AUTO_REMOVE_UNSELECTED)
+        )
 
         scan_mode_default = existing.get(OPT_SCAN_MODE, DEFAULT_SCAN_MODE)
-        scan_interval_default = int(existing.get(OPT_SCAN_INTERVAL_MINUTES, DEFAULT_SCAN_INTERVAL_MINUTES))
+        scan_interval_default = int(
+            existing.get(OPT_SCAN_INTERVAL_MINUTES, DEFAULT_SCAN_INTERVAL_MINUTES)
+        )
         scan_times_default = existing.get(OPT_SCAN_TIMES, DEFAULT_SCAN_TIMES)
 
         if user_input is not None:
             scan_mode = user_input.get(OPT_SCAN_MODE, DEFAULT_SCAN_MODE)
 
             if scan_mode == "interval":
-                minutes = int(user_input.get(OPT_SCAN_INTERVAL_MINUTES, DEFAULT_SCAN_INTERVAL_MINUTES))
+                minutes = int(
+                    user_input.get(
+                        OPT_SCAN_INTERVAL_MINUTES,
+                        DEFAULT_SCAN_INTERVAL_MINUTES,
+                    )
+                )
                 if minutes < 1 or minutes > 1440:
                     errors[OPT_SCAN_INTERVAL_MINUTES] = "invalid_range"
 
@@ -136,32 +179,72 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             if not errors:
                 cleaned = dict(user_input)
 
-                # Hvis brugeren ender med tom liste, så vælg alle (hvis vi kender dem)
                 if not cleaned.get(OPT_SELECTED_CHILDREN) and self._children:
                     cleaned[OPT_SELECTED_CHILDREN] = list(self._children)
 
-                # Sikr booleans
-                cleaned[OPT_SHOW_ALL_SENSOR] = bool(cleaned.get(OPT_SHOW_ALL_SENSOR, DEFAULT_SHOW_ALL_SENSOR))
-                cleaned[OPT_AUTO_REMOVE_UNSELECTED] = bool(
-                    cleaned.get(OPT_AUTO_REMOVE_UNSELECTED, DEFAULT_AUTO_REMOVE_UNSELECTED)
+                cleaned[OPT_SHOW_HOMEWORK_SENSORS] = bool(
+                    cleaned.get(
+                        OPT_SHOW_HOMEWORK_SENSORS,
+                        DEFAULT_SHOW_HOMEWORK_SENSORS,
+                    )
                 )
-                cleaned[OPT_ADD_MARKDOWN] = bool(cleaned.get(OPT_ADD_MARKDOWN, DEFAULT_ADD_MARKDOWN))
+                cleaned[OPT_ADD_HOMEWORK_MARKDOWN] = bool(
+                    cleaned.get(
+                        OPT_ADD_HOMEWORK_MARKDOWN,
+                        DEFAULT_ADD_HOMEWORK_MARKDOWN,
+                    )
+                )
 
-                # Polish: ryd irrelevante scan-felter
+                cleaned[OPT_SHOW_WEEKPLAN_SENSORS] = bool(
+                    cleaned.get(
+                        OPT_SHOW_WEEKPLAN_SENSORS,
+                        DEFAULT_SHOW_WEEKPLAN_SENSORS,
+                    )
+                )
+                cleaned[OPT_ADD_WEEKPLAN_MARKDOWN] = bool(
+                    cleaned.get(
+                        OPT_ADD_WEEKPLAN_MARKDOWN,
+                        DEFAULT_ADD_WEEKPLAN_MARKDOWN,
+                    )
+                )
+                cleaned[OPT_INCLUDE_WEEKPLAN_SCHEDULE] = bool(
+                    cleaned.get(
+                        OPT_INCLUDE_WEEKPLAN_SCHEDULE,
+                        DEFAULT_INCLUDE_WEEKPLAN_SCHEDULE,
+                    )
+                )
+                cleaned[OPT_INCLUDE_WEEKPLAN_GENERAL] = bool(
+                    cleaned.get(
+                        OPT_INCLUDE_WEEKPLAN_GENERAL,
+                        DEFAULT_INCLUDE_WEEKPLAN_GENERAL,
+                    )
+                )
+
+                cleaned[OPT_AUTO_REMOVE_UNSELECTED] = bool(
+                    cleaned.get(
+                        OPT_AUTO_REMOVE_UNSELECTED,
+                        DEFAULT_AUTO_REMOVE_UNSELECTED,
+                    )
+                )
+
                 if scan_mode == "interval":
                     cleaned[OPT_SCAN_TIMES] = ""
                     cleaned[OPT_SCAN_INTERVAL_MINUTES] = int(
-                        cleaned.get(OPT_SCAN_INTERVAL_MINUTES, DEFAULT_SCAN_INTERVAL_MINUTES)
+                        cleaned.get(
+                            OPT_SCAN_INTERVAL_MINUTES,
+                            DEFAULT_SCAN_INTERVAL_MINUTES,
+                        )
                     )
                 else:
                     cleaned[OPT_SCAN_INTERVAL_MINUTES] = DEFAULT_SCAN_INTERVAL_MINUTES
-                    cleaned[OPT_SCAN_TIMES] = (cleaned.get(OPT_SCAN_TIMES) or "").strip()
+                    cleaned[OPT_SCAN_TIMES] = (
+                        cleaned.get(OPT_SCAN_TIMES) or ""
+                    ).strip()
 
                 return self.async_create_entry(title="", data=cleaned)
 
         schema_dict: dict = {}
 
-        # Børn selector (checkboxes)
         if self._children:
             children_selector = selector.SelectSelector(
                 selector.SelectSelectorConfig(
@@ -170,9 +253,13 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     mode=selector.SelectSelectorMode.LIST,
                 )
             )
-            schema_dict[vol.Required(OPT_SELECTED_CHILDREN, default=selected_default)] = children_selector
+            schema_dict[
+                vol.Required(
+                    OPT_SELECTED_CHILDREN,
+                    default=selected_default,
+                )
+            ] = children_selector
 
-        # Visningsperiode
         display_selector = selector.SelectSelector(
             selector.SelectSelectorConfig(
                 options=[
@@ -184,16 +271,55 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 mode=selector.SelectSelectorMode.DROPDOWN,
             )
         )
-        schema_dict[vol.Required(OPT_DISPLAY_PERIOD, default=display_default)] = display_selector
+        schema_dict[
+            vol.Required(OPT_DISPLAY_PERIOD, default=display_default)
+        ] = display_selector
 
-        # Markdown attribute
-        schema_dict[vol.Required(OPT_ADD_MARKDOWN, default=markdown_default)] = bool
+        schema_dict[
+            vol.Required(
+                OPT_SHOW_HOMEWORK_SENSORS,
+                default=show_homework_default,
+            )
+        ] = bool
+        schema_dict[
+            vol.Required(
+                OPT_ADD_HOMEWORK_MARKDOWN,
+                default=add_homework_markdown_default,
+            )
+        ] = bool
 
-        # "Alle"-sensor + auto-remove
-        schema_dict[vol.Required(OPT_SHOW_ALL_SENSOR, default=show_all_default)] = bool
-        schema_dict[vol.Required(OPT_AUTO_REMOVE_UNSELECTED, default=auto_remove_default)] = bool
+        schema_dict[
+            vol.Required(
+                OPT_SHOW_WEEKPLAN_SENSORS,
+                default=show_weekplan_default,
+            )
+        ] = bool
+        schema_dict[
+            vol.Required(
+                OPT_ADD_WEEKPLAN_MARKDOWN,
+                default=add_weekplan_markdown_default,
+            )
+        ] = bool
+        schema_dict[
+            vol.Required(
+                OPT_INCLUDE_WEEKPLAN_SCHEDULE,
+                default=include_weekplan_schedule_default,
+            )
+        ] = bool
+        schema_dict[
+            vol.Required(
+                OPT_INCLUDE_WEEKPLAN_GENERAL,
+                default=include_weekplan_general_default,
+            )
+        ] = bool
 
-        # Scan mode (pæn dropdown)
+        schema_dict[
+            vol.Required(
+                OPT_AUTO_REMOVE_UNSELECTED,
+                default=auto_remove_default,
+            )
+        ] = bool
+
         scan_mode_selector = selector.SelectSelector(
             selector.SelectSelectorConfig(
                 options=[
@@ -204,13 +330,24 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 mode=selector.SelectSelectorMode.DROPDOWN,
             )
         )
-        schema_dict[vol.Required(OPT_SCAN_MODE, default=scan_mode_default)] = scan_mode_selector
+        schema_dict[
+            vol.Required(OPT_SCAN_MODE, default=scan_mode_default)
+        ] = scan_mode_selector
+        schema_dict[
+            vol.Optional(
+                OPT_SCAN_INTERVAL_MINUTES,
+                default=scan_interval_default,
+            )
+        ] = vol.Coerce(int)
+        schema_dict[
+            vol.Optional(OPT_SCAN_TIMES, default=scan_times_default)
+        ] = str
 
-        # Optional ellers bliver "Send" blokeret
-        schema_dict[vol.Optional(OPT_SCAN_INTERVAL_MINUTES, default=scan_interval_default)] = vol.Coerce(int)
-        schema_dict[vol.Optional(OPT_SCAN_TIMES, default=scan_times_default)] = str
-
-        return self.async_show_form(step_id="init", data_schema=vol.Schema(schema_dict), errors=errors)
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema(schema_dict),
+            errors=errors,
+        )
 
     async def _fetch_children_names(self) -> list[str]:
         session = async_get_clientsession(self.hass)
@@ -228,6 +365,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         parts = [p.strip() for p in csv.split(",") if p.strip()]
         if not parts:
             return False
+
         for p in parts:
             if not re.match(r"^\d{2}:\d{2}$", p):
                 return False
@@ -236,4 +374,5 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             m = int(mm)
             if h < 0 or h > 23 or m < 0 or m > 59:
                 return False
+
         return True
