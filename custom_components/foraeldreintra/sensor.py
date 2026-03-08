@@ -45,7 +45,7 @@ def _parse_iso_date(s: str | None) -> date | None:
         return None
     try:
         return datetime.strptime(s, "%Y-%m-%d").date()
-    except Exception:
+    except Exception:  # noqa: BLE001
         return None
 
 
@@ -72,6 +72,7 @@ def _filter_items(entry: ConfigEntry, items: list[dict[str, Any]], child: str | 
         elif period == "future_only":
             if d is not None and d <= today:
                 continue
+        # "all": ingen filter
 
         out.append(it)
 
@@ -88,6 +89,7 @@ def _pretty_title_case(s: str) -> str:
 
 
 def _format_header(date_iso: str) -> str:
+    # date_iso: YYYY-MM-DD
     d = _parse_iso_date(date_iso)
     if not d:
         return f"# {date_iso}"
@@ -97,7 +99,12 @@ def _format_header(date_iso: str) -> str:
     return f"# {wd} d.{d.day} {DK_MONTH[d.month - 1]} {d.year}"
 
 
+def _safe(v: Any) -> str:
+    return (v or "").to_string().strip() if hasattr(v, "to_string") else str(v or "").strip()
+
+
 def _build_markdown(items: list[dict[str, Any]]) -> str:
+    # dato -> barn -> fag -> blocks
     by_date: dict[str, dict[str, dict[str, list[str]]]] = {}
 
     for it in items:
@@ -107,11 +114,13 @@ def _build_markdown(items: list[dict[str, Any]]) -> str:
         tekst = (it.get("tekst") or "").strip()
         links = it.get("links") if isinstance(it.get("links"), list) else []
 
+        # Skip tomme entries
         if not tekst and not links:
             continue
 
+        # Heuristik: udled fag fra tekststart, fx "MUSIK: ..."
         if not fag and tekst:
-            m = re.match(r"^([A-ZÆØÅ0-9 .\\-]{2,30}):\\s*([\\s\\S]*)$", tekst)
+            m = re.match(r"^([A-ZÆØÅ0-9 .\-]{2,30}):\s*([\s\S]*)$", tekst)
             if m:
                 fag = m.group(1).strip()
                 tekst = (m.group(2) or "").strip()
@@ -128,7 +137,7 @@ def _build_markdown(items: list[dict[str, Any]]) -> str:
             t = (l.get("tekst") or "link").strip()
             u = (l.get("url") or "").strip()
             if u:
-                block += f"\\n- [{t}]({u})"
+                block += f"\n- [{t}]({u})"
 
         by_date[dato][barn][fag].append(block.strip())
 
@@ -137,19 +146,19 @@ def _build_markdown(items: list[dict[str, Any]]) -> str:
 
     for i, d_iso in enumerate(dates):
         if i > 0:
-            out += "\\n\\n---\\n"
+            out += "\n\n---\n"
 
-        out += f"{_format_header(d_iso)}\\n\\n"
+        out += f"{_format_header(d_iso)}\n\n"
 
         children = sorted(by_date[d_iso].keys())
         for child in children:
-            out += f"## {child}\\n"
+            out += f"## {child}\n"
             subjects = sorted(by_date[d_iso][child].keys())
             for subject in subjects:
-                out += f"{subject}:\\n"
+                out += f"{subject}:\n"
                 for b in by_date[d_iso][child][subject]:
-                    out += f"{b}\\n\\n"
-            out += "\\n"
+                    out += f"{b}\n\n"
+            out += "\n"
 
     return out.strip() if out.strip() else "Ingen lektier fundet."
 
@@ -161,25 +170,17 @@ async def async_setup_entry(
 ) -> None:
     coordinator: ForaldreIntraCoordinator = hass.data[DOMAIN][entry.entry_id]
     data = coordinator.data or {}
-
-    coordinator_children = [
-        c.get("name")
-        for c in data.get("children", [])
-        if isinstance(c, dict) and c.get("name")
-    ]
-    selected_children: list[str] = entry.options.get(OPT_SELECTED_CHILDREN, [])
-
-    child_names = coordinator_children[:]
-    for child in selected_children:
-        if child and child not in child_names:
-            child_names.append(child)
+    children = [c.get("name") for c in data.get("children", []) if c.get("name")]
+    selected_children: list[str] = entry.options.get(OPT_SELECTED_CHILDREN, children)
 
     entities: list[SensorEntity] = []
 
     if bool(entry.options.get(OPT_SHOW_ALL_SENSOR, DEFAULT_SHOW_ALL_SENSOR)):
         entities.append(ForaeldreIntraAllHomeworkSensor(coordinator, entry))
 
-    for child_name in child_names:
+    for child_name in children:
+        if selected_children and child_name not in set(selected_children):
+            continue
         entities.append(ForaeldreIntraChildHomeworkSensor(coordinator, entry, child_name))
         entities.append(ForaeldreIntraChildWeekplanSensor(coordinator, entry, child_name))
 
@@ -201,7 +202,7 @@ class ForaeldreIntraBaseSensor(CoordinatorEntity[ForaldreIntraCoordinator], Sens
 
 
 class ForaeldreIntraAllHomeworkSensor(ForaeldreIntraBaseSensor):
-    _attr_name = "ForældreIntra lektier (alle) test123" 
+    _attr_name = "ForældreIntra lektier (alle)"
     _attr_icon = "mdi:book-open-page-variant"
 
     def __init__(self, coordinator: ForaldreIntraCoordinator, entry: ConfigEntry) -> None:
@@ -231,7 +232,7 @@ class ForaeldreIntraChildHomeworkSensor(ForaeldreIntraBaseSensor):
     def __init__(self, coordinator: ForaldreIntraCoordinator, entry: ConfigEntry, child_name: str) -> None:
         super().__init__(coordinator, entry)
         self._child = child_name
-        self._attr_name = f"ForældreIntra lektier test123 ({child_name})"
+        self._attr_name = f"ForældreIntra lektier ({child_name})"
         self._attr_unique_id = f"{entry.entry_id}_homework_{slugify(child_name)}"
 
     @property
@@ -275,9 +276,7 @@ class ForaeldreIntraChildWeekplanSensor(ForaeldreIntraBaseSensor):
             "barn": self._child,
             "title": plan.get("title"),
             "week": plan.get("week"),
-            "class_or_group": plan.get("class_or_group"),
             "url": plan.get("url"),
-            "general": plan.get("general", []),
-            "days": plan.get("days", []),
+            "items": plan.get("items", []),
             "markdown": plan.get("markdown", "Ingen ugeplan fundet."),
         }
