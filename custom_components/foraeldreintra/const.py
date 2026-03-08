@@ -7,18 +7,31 @@ CONF_PASSWORD = "password"
 PLATFORMS = ["sensor"]
 
 # Options
-OPT_SELECTED_CHILDREN = "selected_children"  # list[str]
-OPT_SHOW_ALL_SENSOR = "show_all_sensor"
-DEFAULT_SHOW_ALL_SENSOR = True
+OPT_SELECTED_CHILDREN = "selected_children"
+
+OPT_SHOW_HOMEWORK_SENSORS = "show_homework_sensors"
+DEFAULT_SHOW_HOMEWORK_SENSORS = True
+
+OPT_ADD_HOMEWORK_MARKDOWN = "add_homework_markdown"
+DEFAULT_ADD_HOMEWORK_MARKDOWN = False
+
+OPT_SHOW_WEEKPLAN_SENSORS = "show_weekplan_sensors"
+DEFAULT_SHOW_WEEKPLAN_SENSORS = True
+
+OPT_ADD_WEEKPLAN_MARKDOWN = "add_weekplan_markdown"
+DEFAULT_ADD_WEEKPLAN_MARKDOWN = True
+
+OPT_INCLUDE_WEEKPLAN_SCHEDULE = "include_weekplan_schedule"
+DEFAULT_INCLUDE_WEEKPLAN_SCHEDULE = True
+
+OPT_INCLUDE_WEEKPLAN_GENERAL = "include_weekplan_general"
+DEFAULT_INCLUDE_WEEKPLAN_GENERAL = True
 
 OPT_AUTO_REMOVE_UNSELECTED = "auto_remove_unselected"
 DEFAULT_AUTO_REMOVE_UNSELECTED = False
 
 OPT_DISPLAY_PERIOD = "display_period"  # "all" | "today_and_future" | "future_only"
 DEFAULT_DISPLAY_PERIOD = "today_and_future"
-
-OPT_ADD_MARKDOWN = "add_markdown"
-DEFAULT_ADD_MARKDOWN = False
 
 OPT_SCAN_MODE = "scan_mode"  # "interval" | "fixed_times"
 OPT_SCAN_INTERVAL_MINUTES = "scan_interval_minutes"  # int
