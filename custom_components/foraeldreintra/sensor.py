@@ -401,12 +401,9 @@ class ForaeldreIntraChildWeekplanSensor(ForaeldreIntraBaseSensor):
             items = [x for x in items if x.get("type") != "general"]
 
         if not include_schedule:
-            filtered_days = []
-            for day in days:
-                day_copy = dict(day)
-                day_copy["schedule"] = []
-                filtered_days.append(day_copy)
-            days = filtered_days
+            # Hvis skema ikke ønskes, skjuler vi hele dagsdelen
+            items = [x for x in items if x.get("type") != "day"]
+            days = []
 
         attrs["items"] = items
         attrs["days"] = days
