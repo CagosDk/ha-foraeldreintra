@@ -15,9 +15,11 @@ from .const import (
     DEFAULT_ADD_HOMEWORK_MARKDOWN,
     DEFAULT_ADD_WEEKPLAN_MARKDOWN,
     DEFAULT_DISPLAY_PERIOD,
+    DEFAULT_INCLUDE_WEEKPLAN_FOCUS,
     DEFAULT_INCLUDE_WEEKPLAN_GENERAL,
     DEFAULT_INCLUDE_WEEKPLAN_SCHEDULE,
     DEFAULT_SHOW_HOMEWORK_SENSORS,
+    DEFAULT_SHOW_WEEKPLAN_FOCUS_SENSORS,
     DEFAULT_SHOW_WEEKPLAN_GENERAL_SENSORS,
     DEFAULT_SHOW_WEEKPLAN_SCHEDULE_SENSORS,
     DEFAULT_SHOW_WEEKPLAN_SENSORS,
@@ -26,10 +28,12 @@ from .const import (
     OPT_ADD_HOMEWORK_MARKDOWN,
     OPT_ADD_WEEKPLAN_MARKDOWN,
     OPT_DISPLAY_PERIOD,
+    OPT_INCLUDE_WEEKPLAN_FOCUS,
     OPT_INCLUDE_WEEKPLAN_GENERAL,
     OPT_INCLUDE_WEEKPLAN_SCHEDULE,
     OPT_SELECTED_CHILDREN,
     OPT_SHOW_HOMEWORK_SENSORS,
+    OPT_SHOW_WEEKPLAN_FOCUS_SENSORS,
     OPT_SHOW_WEEKPLAN_GENERAL_SENSORS,
     OPT_SHOW_WEEKPLAN_SCHEDULE_SENSORS,
     OPT_SHOW_WEEKPLAN_SENSORS,
@@ -308,9 +312,9 @@ def _looks_like_date_heading(text: str) -> bool:
 
     if re.match(
         r"^(Mandag|Tirsdag|Onsdag|Torsdag|Fredag|Lørdag|Søndag),\s*"
-        r"(mandag|tirsdag|onsdag|torsdag|fredag|lørdag|søndag)\s+og\s+"
-        r"(mandag|tirsdag|onsdag|torsdag|fredag|lørdag|søndag):$",
-        s.lower(),
+        r".*:$",
+        s,
+        re.IGNORECASE,
     ):
         return True
 
@@ -330,12 +334,12 @@ def _format_general_content(text: str) -> str:
         line = lines[i]
 
         if _looks_like_date_heading(line) and i + 1 < len(lines):
-            formatted.append(f"**{line}** {lines[i + 1]}")
+            formatted.append(f"### {line}\n{lines[i + 1]}")
             i += 2
             continue
 
         if line.endswith(":") and len(line) > 20:
-            formatted.append(f"**{line}**")
+            formatted.append(f"### {line}")
             i += 1
             continue
 
@@ -410,6 +414,7 @@ def _build_homework_markdown(items: list[dict[str, Any]]) -> str:
 def _build_weekplan_markdown(
     plan: dict[str, Any],
     include_general: bool,
+    include_focus: bool,
     include_schedule: bool,
     alias_map: dict[str, str],
 ) -> str:
@@ -428,7 +433,9 @@ def _build_weekplan_markdown(
     for day in days:
         lesson_plans = day.get("lesson_plans") or []
         schedule = day.get("schedule") or []
-        if lesson_plans or (include_schedule and schedule):
+        has_focus = include_focus and bool(lesson_plans)
+        has_schedule = include_schedule and bool(schedule)
+        if has_focus or has_schedule:
             visible_days.append(day)
 
     has_general_section = include_general and bool(general_items)
@@ -462,22 +469,24 @@ def _build_weekplan_markdown(
             day_parts.append(f"## {header}")
 
         lesson_plans = day.get("lesson_plans", [])
-        for lesson_idx, lesson in enumerate(lesson_plans):
-            subject = _apply_subject_alias((lesson.get("subject") or "Generelt").strip(), alias_map)
-            if subject and subject.lower() not in {"generelt", "(uden angivelse af fag)"}:
-                day_parts.append(f"### {subject}")
 
-            if lesson.get("content_text"):
-                day_parts.append(lesson["content_text"])
+        if include_focus:
+            for lesson_idx, lesson in enumerate(lesson_plans):
+                subject = _apply_subject_alias((lesson.get("subject") or "Generelt").strip(), alias_map)
+                if subject and subject.lower() not in {"generelt", "(uden angivelse af fag)"}:
+                    day_parts.append(f"### {subject}")
 
-            if lesson_idx < len(lesson_plans) - 1:
-                day_parts.append(SECTION_DIVIDER)
+                if lesson.get("content_text"):
+                    day_parts.append(lesson["content_text"])
+
+                if lesson_idx < len(lesson_plans) - 1:
+                    day_parts.append(SECTION_DIVIDER)
 
         if include_schedule:
             schedule_lines = _combine_schedule_rows(day.get("schedule", []), alias_map)
 
             if schedule_lines:
-                if lesson_plans:
+                if include_focus and lesson_plans:
                     day_parts.append(SECTION_DIVIDER)
                 day_parts.append("### Skema")
                 day_parts.append("\n".join(schedule_lines))
@@ -502,14 +511,47 @@ def _plan_general_only(plan: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _plan_schedule_only(plan: dict[str, Any]) -> dict[str, Any]:
+def _plan_focus_only(plan: dict[str, Any]) -> dict[str, Any]:
+    focus_days = []
+    for day in plan.get("days", []) or []:
+        lesson_plans = day.get("lesson_plans") or []
+        if lesson_plans:
+            focus_days.append(
+                {
+                    **day,
+                    "schedule": [],
+                }
+            )
+
     return {
         "title": plan.get("title"),
         "week": plan.get("week"),
         "url": plan.get("url"),
         "class_or_group": plan.get("class_or_group"),
         "items": [],
-        "days": plan.get("days") or [],
+        "days": focus_days,
+    }
+
+
+def _plan_schedule_only(plan: dict[str, Any]) -> dict[str, Any]:
+    schedule_days = []
+    for day in plan.get("days", []) or []:
+        schedule = day.get("schedule") or []
+        if schedule:
+            schedule_days.append(
+                {
+                    **day,
+                    "lesson_plans": [],
+                }
+            )
+
+    return {
+        "title": plan.get("title"),
+        "week": plan.get("week"),
+        "url": plan.get("url"),
+        "class_or_group": plan.get("class_or_group"),
+        "items": [],
+        "days": schedule_days,
     }
 
 
@@ -537,6 +579,12 @@ async def async_setup_entry(
             DEFAULT_SHOW_WEEKPLAN_GENERAL_SENSORS,
         )
     )
+    show_weekplan_focus_sensors = bool(
+        entry.options.get(
+            OPT_SHOW_WEEKPLAN_FOCUS_SENSORS,
+            DEFAULT_SHOW_WEEKPLAN_FOCUS_SENSORS,
+        )
+    )
     show_weekplan_schedule_sensors = bool(
         entry.options.get(
             OPT_SHOW_WEEKPLAN_SCHEDULE_SENSORS,
@@ -559,6 +607,9 @@ async def async_setup_entry(
 
         if show_weekplan_general_sensors:
             entities.append(ForaeldreIntraChildWeekplanGeneralSensor(coordinator, entry, child_name))
+
+        if show_weekplan_focus_sensors:
+            entities.append(ForaeldreIntraChildWeekplanFocusSensor(coordinator, entry, child_name))
 
         if show_weekplan_schedule_sensors:
             entities.append(ForaeldreIntraChildWeekplanScheduleSensor(coordinator, entry, child_name))
@@ -667,6 +718,12 @@ class ForaeldreIntraChildWeekplanSensor(ForaeldreIntraBaseSensor):
                 DEFAULT_INCLUDE_WEEKPLAN_GENERAL,
             )
         )
+        include_focus = bool(
+            self._entry.options.get(
+                OPT_INCLUDE_WEEKPLAN_FOCUS,
+                DEFAULT_INCLUDE_WEEKPLAN_FOCUS,
+            )
+        )
         include_schedule = bool(
             self._entry.options.get(
                 OPT_INCLUDE_WEEKPLAN_SCHEDULE,
@@ -686,14 +743,16 @@ class ForaeldreIntraChildWeekplanSensor(ForaeldreIntraBaseSensor):
         if not include_general:
             items = [x for x in items if x.get("type") != "general"]
 
-        if not include_schedule:
-            days = [
-                {
-                    **day,
-                    "schedule": [],
-                }
-                for day in days
-            ]
+        filtered_days = []
+        for day in days:
+            new_day = dict(day)
+            if not include_focus:
+                new_day["lesson_plans"] = []
+            if not include_schedule:
+                new_day["schedule"] = []
+
+            if new_day.get("lesson_plans") or new_day.get("schedule"):
+                filtered_days.append(new_day)
 
         attrs: dict[str, Any] = {
             "barn": self._child,
@@ -702,7 +761,7 @@ class ForaeldreIntraChildWeekplanSensor(ForaeldreIntraBaseSensor):
             "url": plan.get("url"),
             "class_or_group": plan.get("class_or_group"),
             "items": items,
-            "days": days,
+            "days": filtered_days,
         }
 
         if add_markdown:
@@ -712,9 +771,10 @@ class ForaeldreIntraChildWeekplanSensor(ForaeldreIntraBaseSensor):
                     "week": plan.get("week"),
                     "class_or_group": plan.get("class_or_group"),
                     "items": items,
-                    "days": days,
+                    "days": filtered_days,
                 },
                 include_general=include_general,
+                include_focus=include_focus,
                 include_schedule=include_schedule,
                 alias_map=self._subject_alias_map(),
             )
@@ -763,6 +823,56 @@ class ForaeldreIntraChildWeekplanGeneralSensor(ForaeldreIntraBaseSensor):
                     "days": [],
                 },
                 include_general=True,
+                include_focus=False,
+                include_schedule=False,
+                alias_map=self._subject_alias_map(),
+            )
+
+        return attrs
+
+
+class ForaeldreIntraChildWeekplanFocusSensor(ForaeldreIntraBaseSensor):
+    _attr_icon = "mdi:target-text"
+
+    def __init__(self, coordinator: ForaldreIntraCoordinator, entry: ConfigEntry, child_name: str) -> None:
+        super().__init__(coordinator, entry)
+        self._child = child_name
+        self._attr_name = f"ForældreIntra ugeplan fokus ({child_name})"
+        self._attr_unique_id = f"{entry.entry_id}_weekplan_focus_{slugify(child_name)}"
+
+    @property
+    def native_value(self) -> str:
+        weeklyplans = (self.coordinator.data or {}).get("weeklyplans", {})
+        plan = weeklyplans.get(self._child, {})
+        return _week_short(plan.get("week")) or "ingen"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        weeklyplans = (self.coordinator.data or {}).get("weeklyplans", {})
+        raw_plan = dict(weeklyplans.get(self._child, {}) or {})
+        plan = _plan_focus_only(raw_plan)
+
+        attrs: dict[str, Any] = {
+            "barn": self._child,
+            "title": _build_display_title(raw_plan),
+            "week": _week_short(raw_plan.get("week")),
+            "url": plan.get("url"),
+            "class_or_group": plan.get("class_or_group"),
+            "items": [],
+            "days": plan.get("days", []),
+        }
+
+        if bool(self._entry.options.get(OPT_ADD_WEEKPLAN_MARKDOWN, DEFAULT_ADD_WEEKPLAN_MARKDOWN)):
+            attrs["markdown"] = _build_weekplan_markdown(
+                {
+                    "title": raw_plan.get("title"),
+                    "week": raw_plan.get("week"),
+                    "class_or_group": raw_plan.get("class_or_group"),
+                    "items": [],
+                    "days": plan.get("days", []),
+                },
+                include_general=False,
+                include_focus=True,
                 include_schedule=False,
                 alias_map=self._subject_alias_map(),
             )
@@ -811,6 +921,7 @@ class ForaeldreIntraChildWeekplanScheduleSensor(ForaeldreIntraBaseSensor):
                     "days": plan.get("days", []),
                 },
                 include_general=False,
+                include_focus=False,
                 include_schedule=True,
                 alias_map=self._subject_alias_map(),
             )
