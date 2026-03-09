@@ -133,7 +133,7 @@ def _parse_subject_aliases(raw: str | None) -> dict[str, str]:
     if not raw:
         return aliases
 
-    text = raw.replace(";", "\n").replace(",", "\n")
+    text = str(raw).replace(";", "\n").replace(",", "\n")
     for line in text.splitlines():
         line = line.strip()
         if not line or "=" not in line:
@@ -153,7 +153,6 @@ def _apply_subject_alias(label: str, alias_map: dict[str, str]) -> str:
     cleaned = (label or "").strip()
     if not cleaned:
         return ""
-
     return alias_map.get(cleaned.upper(), cleaned)
 
 
