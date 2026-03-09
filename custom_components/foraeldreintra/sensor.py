@@ -123,7 +123,7 @@ def _build_homework_markdown(items: list[dict[str, Any]]) -> str:
             continue
 
         if not fag and tekst:
-            m = re.match(r"^([A-ZÆØÅ0-9 .\-]{2,30}):\s*([\s\S]*)$", tekst)
+            m = re.match(r"^([A-ZÆØÅ0-9 .\\-]{2,30}):\\s*([\\s\\S]*)$", tekst)
             if m:
                 fag = m.group(1).strip()
                 tekst = (m.group(2) or "").strip()
@@ -140,7 +140,7 @@ def _build_homework_markdown(items: list[dict[str, Any]]) -> str:
             t = (l.get("tekst") or "link").strip()
             u = (l.get("url") or "").strip()
             if u:
-                block += f"\n- [{t}]({u})"
+                block += f"\\n- [{t}]({u})"
 
         by_date[dato][barn][fag].append(block.strip())
 
@@ -149,19 +149,19 @@ def _build_homework_markdown(items: list[dict[str, Any]]) -> str:
 
     for i, d_iso in enumerate(dates):
         if i > 0:
-            out += "\n\n---\n"
+            out += "\\n\\n---\\n"
 
-        out += f"{_format_header(d_iso)}\n\n"
+        out += f"{_format_header(d_iso)}\\n\\n"
 
         children = sorted(by_date[d_iso].keys())
         for child in children:
-            out += f"## {child}\n"
+            out += f"## {child}\\n"
             subjects = sorted(by_date[d_iso][child].keys())
             for subject in subjects:
-                out += f"{subject}:\n"
+                out += f"{subject}:\\n"
                 for b in by_date[d_iso][child][subject]:
-                    out += f"{b}\n\n"
-            out += "\n"
+                    out += f"{b}\\n\\n"
+            out += "\\n"
 
     return out.strip() if out.strip() else "Ingen lektier fundet."
 
@@ -181,14 +181,6 @@ def _build_weekplan_markdown(
         markdown_parts.append(f"# {title}")
 
     general_items = [x for x in items if x.get("type") == "general"]
-    if include_general and general_items:
-        markdown_parts.append("## Generelt")
-        for item in general_items:
-            subject = (item.get("subject") or "").strip()
-            if subject and subject != "Generelt":
-                markdown_parts.append(f"### {subject}")
-            if item.get("content_text"):
-                markdown_parts.append(item["content_text"])
 
     visible_days = []
     for day in days:
@@ -197,7 +189,26 @@ def _build_weekplan_markdown(
         if lesson_plans or (include_schedule and schedule):
             visible_days.append(day)
 
-    if include_general and general_items and visible_days:
+    has_general_section = include_general and bool(general_items)
+    has_day_section = bool(visible_days)
+
+    if has_general_section:
+        if title:
+            markdown_parts.append("---")
+        markdown_parts.append("## Generelt")
+
+        for idx, item in enumerate(general_items):
+            subject = (item.get("subject") or "").strip()
+            if subject and subject != "Generelt":
+                markdown_parts.append(f"### {subject}")
+
+            if item.get("content_text"):
+                markdown_parts.append(item["content_text"])
+
+            if idx < len(general_items) - 1:
+                markdown_parts.append("---")
+
+    if has_general_section and has_day_section:
         markdown_parts.append("---")
 
     for idx, day in enumerate(visible_days):
@@ -209,11 +220,14 @@ def _build_weekplan_markdown(
         if header:
             markdown_parts.append(f"## {header}")
 
-        for lesson in day.get("lesson_plans", []):
+        for lesson_idx, lesson in enumerate(day.get("lesson_plans", [])):
             subject = (lesson.get("subject") or "Generelt").strip()
             markdown_parts.append(f"### {subject}")
             if lesson.get("content_text"):
                 markdown_parts.append(lesson["content_text"])
+
+            if lesson_idx < len(day.get("lesson_plans", [])) - 1:
+                markdown_parts.append("---")
 
         if include_schedule:
             schedule_lines: list[str] = []
@@ -232,13 +246,15 @@ def _build_weekplan_markdown(
                     schedule_lines.append(f"- {label}")
 
             if schedule_lines:
+                if day.get("lesson_plans"):
+                    markdown_parts.append("---")
                 markdown_parts.append("### Skema")
-                markdown_parts.append("\n".join(schedule_lines))
+                markdown_parts.append("\\n".join(schedule_lines))
 
         if idx < len(visible_days) - 1:
             markdown_parts.append("---")
 
-    return "\n\n".join(part for part in markdown_parts if part).strip() or "Ingen ugeplan fundet."
+    return "\\n\\n".join(part for part in markdown_parts if part).strip() or "Ingen ugeplan fundet."
 
 
 async def async_setup_entry(
@@ -401,9 +417,13 @@ class ForaeldreIntraChildWeekplanSensor(ForaeldreIntraBaseSensor):
             items = [x for x in items if x.get("type") != "general"]
 
         if not include_schedule:
-            # Hvis skema ikke ønskes, skjuler vi hele dagsdelen
-            items = [x for x in items if x.get("type") != "day"]
-            days = []
+            days = [
+                {
+                    **day,
+                    "schedule": [],
+                }
+                for day in days
+            ]
 
         attrs["items"] = items
         attrs["days"] = days
