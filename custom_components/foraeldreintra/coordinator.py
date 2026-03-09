@@ -70,7 +70,7 @@ class ForaldreIntraCoordinator(DataUpdateCoordinator[dict]):
         for unsub in self._unsubs:
             try:
                 unsub()
-            except Exception:  # noqa: BLE001
+            except Exception:
                 pass
         self._unsubs = []
 
@@ -122,7 +122,7 @@ class ForaldreIntraCoordinator(DataUpdateCoordinator[dict]):
             return await self._fetch_children_and_homework()
         except (ForaldreIntraAuthError, ForaldreIntraError) as err:
             raise UpdateFailed(str(err)) from err
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             raise UpdateFailed(f"Ukendt fejl: {err}") from err
 
     async def _fetch_children_and_homework(self) -> dict:
@@ -133,7 +133,7 @@ class ForaldreIntraCoordinator(DataUpdateCoordinator[dict]):
             children = await self.client.get_children()
 
         items = await self.client.get_homework_for_children(children)
-        weeklyplans = await self.client.get_latest_weekplans_for_children(children)
+        weeklyplans = await self.client.get_weekplans_for_children(children)
 
         return {
             "children": [{"id": c.id, "name": c.name} for c in children],
