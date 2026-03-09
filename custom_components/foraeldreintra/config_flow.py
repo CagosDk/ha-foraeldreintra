@@ -24,7 +24,10 @@ from .const import (
     DEFAULT_SCAN_MODE,
     DEFAULT_SCAN_TIMES,
     DEFAULT_SHOW_HOMEWORK_SENSORS,
+    DEFAULT_SHOW_WEEKPLAN_GENERAL_SENSORS,
+    DEFAULT_SHOW_WEEKPLAN_SCHEDULE_SENSORS,
     DEFAULT_SHOW_WEEKPLAN_SENSORS,
+    DEFAULT_SUBJECT_ALIASES,
     DOMAIN,
     OPT_ADD_HOMEWORK_MARKDOWN,
     OPT_ADD_WEEKPLAN_MARKDOWN,
@@ -37,7 +40,10 @@ from .const import (
     OPT_SCAN_TIMES,
     OPT_SELECTED_CHILDREN,
     OPT_SHOW_HOMEWORK_SENSORS,
+    OPT_SHOW_WEEKPLAN_GENERAL_SENSORS,
+    OPT_SHOW_WEEKPLAN_SCHEDULE_SENSORS,
     OPT_SHOW_WEEKPLAN_SENSORS,
+    OPT_SUBJECT_ALIASES,
 )
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
@@ -130,6 +136,18 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         show_weekplan_default = bool(
             existing.get(OPT_SHOW_WEEKPLAN_SENSORS, DEFAULT_SHOW_WEEKPLAN_SENSORS)
         )
+        show_weekplan_general_sensors_default = bool(
+            existing.get(
+                OPT_SHOW_WEEKPLAN_GENERAL_SENSORS,
+                DEFAULT_SHOW_WEEKPLAN_GENERAL_SENSORS,
+            )
+        )
+        show_weekplan_schedule_sensors_default = bool(
+            existing.get(
+                OPT_SHOW_WEEKPLAN_SCHEDULE_SENSORS,
+                DEFAULT_SHOW_WEEKPLAN_SCHEDULE_SENSORS,
+            )
+        )
         add_weekplan_markdown_default = bool(
             existing.get(OPT_ADD_WEEKPLAN_MARKDOWN, DEFAULT_ADD_WEEKPLAN_MARKDOWN)
         )
@@ -144,6 +162,11 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 OPT_INCLUDE_WEEKPLAN_GENERAL,
                 DEFAULT_INCLUDE_WEEKPLAN_GENERAL,
             )
+        )
+
+        subject_aliases_default = existing.get(
+            OPT_SUBJECT_ALIASES,
+            DEFAULT_SUBJECT_ALIASES,
         )
 
         auto_remove_default = bool(
@@ -201,6 +224,18 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                         DEFAULT_SHOW_WEEKPLAN_SENSORS,
                     )
                 )
+                cleaned[OPT_SHOW_WEEKPLAN_GENERAL_SENSORS] = bool(
+                    cleaned.get(
+                        OPT_SHOW_WEEKPLAN_GENERAL_SENSORS,
+                        DEFAULT_SHOW_WEEKPLAN_GENERAL_SENSORS,
+                    )
+                )
+                cleaned[OPT_SHOW_WEEKPLAN_SCHEDULE_SENSORS] = bool(
+                    cleaned.get(
+                        OPT_SHOW_WEEKPLAN_SCHEDULE_SENSORS,
+                        DEFAULT_SHOW_WEEKPLAN_SCHEDULE_SENSORS,
+                    )
+                )
                 cleaned[OPT_ADD_WEEKPLAN_MARKDOWN] = bool(
                     cleaned.get(
                         OPT_ADD_WEEKPLAN_MARKDOWN,
@@ -219,6 +254,9 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                         DEFAULT_INCLUDE_WEEKPLAN_GENERAL,
                     )
                 )
+                cleaned[OPT_SUBJECT_ALIASES] = (
+                    cleaned.get(OPT_SUBJECT_ALIASES) or ""
+                ).strip()
 
                 cleaned[OPT_AUTO_REMOVE_UNSELECTED] = bool(
                     cleaned.get(
@@ -296,6 +334,18 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         ] = bool
         schema_dict[
             vol.Required(
+                OPT_SHOW_WEEKPLAN_GENERAL_SENSORS,
+                default=show_weekplan_general_sensors_default,
+            )
+        ] = bool
+        schema_dict[
+            vol.Required(
+                OPT_SHOW_WEEKPLAN_SCHEDULE_SENSORS,
+                default=show_weekplan_schedule_sensors_default,
+            )
+        ] = bool
+        schema_dict[
+            vol.Required(
                 OPT_ADD_WEEKPLAN_MARKDOWN,
                 default=add_weekplan_markdown_default,
             )
@@ -312,6 +362,17 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 default=include_weekplan_general_default,
             )
         ] = bool
+        schema_dict[
+            vol.Optional(
+                OPT_SUBJECT_ALIASES,
+                default=subject_aliases_default,
+            )
+        ] = selector.TextSelector(
+            selector.TextSelectorConfig(
+                multiline=True,
+                type=selector.TextSelectorType.TEXT,
+            )
+        )
 
         schema_dict[
             vol.Required(
