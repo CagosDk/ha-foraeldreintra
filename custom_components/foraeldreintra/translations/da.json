@@ -24,30 +24,23 @@
     "step": {
       "init": {
         "title": "Indstillinger",
-        "description": "Vælg hvilke børn der vises samt opdatering og visning.",
+        "description": "Vælg hvilke børn der vises samt hvad der skal udstilles.",
         "data": {
           "selected_children": "Børn",
           "display_period": "Visningsperiode",
           "show_homework_sensors": "Vis lektie-sensorer",
           "add_homework_markdown": "Tilføj markdown til lektier",
+          "include_weekplan_general": "Medtag Generelt i samlet ugeplan",
+          "include_weekplan_focus": "Medtag Fokus i samlet ugeplan",
+          "include_weekplan_schedule": "Medtag Skema i samlet ugeplan",
           "show_weekplan_sensors": "Vis samlet ugeplan-sensor",
           "show_weekplan_general_sensors": "Vis separat sensor for ugeplan generelt",
+          "show_weekplan_focus_sensors": "Vis separat sensor for ugeplan fokus",
           "show_weekplan_schedule_sensors": "Vis separat sensor for ugeplan skema",
           "add_weekplan_markdown": "Tilføj markdown til ugeplan",
-          "include_weekplan_schedule": "Medtag skema i samlet ugeplan",
-          "include_weekplan_general": "Medtag generelt i samlet ugeplan",
-          "subject_aliases": "Fag-oversættelser (én pr. linje, fx BOOS=Booster)",
-          "auto_remove_unselected": "Auto-fjern fravalgte sensorer",
-          "scan_mode": "Opdateringsmetode",
-          "scan_interval_minutes": "Interval (minutter)",
-          "scan_times": "Faste tidspunkter (CSV, fx 06:30,12:00,18:30)"
+          "subject_aliases": "Fag-oversættelser (fx BOOS=Booster, SVØM=Svømning, MAS=)"
         }
       }
-    },
-    "error": {
-      "required": "Skal udfyldes",
-      "invalid_time": "Ugyldigt format. Brug HH:MM, adskil med komma.",
-      "invalid_range": "Ugyldig værdi"
     }
   }
 }
