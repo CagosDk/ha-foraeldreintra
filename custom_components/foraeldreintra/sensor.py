@@ -60,6 +60,7 @@ SECONDARY_SUBJECTS = {
     "PÆD",
     "CO-TEACHER",
     "BOOS",
+    "BOOSTER",
     "VIKAR",
     "HJÆLPELÆRER",
     "PRAKTIKANT",
@@ -130,7 +131,7 @@ def _format_header(date_iso: str) -> str:
 
 def _parse_subject_aliases(raw: str | None) -> dict[str, str]:
     aliases: dict[str, str] = {}
-    if not raw:
+    if raw is None:
         return aliases
 
     text = str(raw).replace(";", "\n").replace(",", "\n")
@@ -140,11 +141,11 @@ def _parse_subject_aliases(raw: str | None) -> dict[str, str]:
             continue
 
         key, value = line.split("=", 1)
-        key = key.strip()
+        key = key.strip().upper()
         value = value.strip()
 
-        if key and value:
-            aliases[key.upper()] = value
+        if key:
+            aliases[key] = value
 
     return aliases
 
@@ -153,7 +154,21 @@ def _apply_subject_alias(label: str, alias_map: dict[str, str]) -> str:
     cleaned = (label or "").strip()
     if not cleaned:
         return ""
-    return alias_map.get(cleaned.upper(), cleaned)
+
+    upper = cleaned.upper()
+    if upper in alias_map:
+        return alias_map[upper].strip()
+
+    return cleaned
+
+
+def _raw_schedule_key(row: dict[str, Any]) -> str:
+    """Returner rå nøgle til sortering/prioritering før alias anvendes."""
+    subject_short = (row.get("subject_short") or "").strip()
+    subject_full = (row.get("subject_full") or "").strip()
+    title_str = (row.get("title") or "").strip()
+
+    return (subject_short or subject_full or title_str).strip()
 
 
 def _normalize_schedule_label(row: dict[str, Any], alias_map: dict[str, str]) -> str:
@@ -177,11 +192,12 @@ def _combine_schedule_rows(
     schedule_rows: list[dict[str, Any]],
     alias_map: dict[str, str],
 ) -> list[str]:
-    grouped: dict[str, list[str]] = {}
+    grouped: dict[str, list[tuple[str, str]]] = {}
     order: list[str] = []
 
     for row in schedule_rows:
         time_str = (row.get("time") or "").strip()
+        raw_key = _raw_schedule_key(row)
         label = _normalize_schedule_label(row, alias_map)
 
         if not time_str and not label:
@@ -191,26 +207,29 @@ def _combine_schedule_rows(
             grouped[time_str] = []
             order.append(time_str)
 
+        # alias som MAS= skal kunne skjule faget helt
         if not label:
             continue
 
-        existing_lower = {x.lower(): x for x in grouped[time_str]}
-        if label.lower() not in existing_lower:
-            grouped[time_str].append(label)
+        existing = {(lbl.lower(), raw.lower()) for lbl, raw in grouped[time_str]}
+        candidate = (label.lower(), raw_key.lower())
+        if candidate not in existing:
+            grouped[time_str].append((label, raw_key))
 
     lines: list[str] = []
 
     for time_str in order:
-        labels = grouped.get(time_str, [])
+        entries = grouped.get(time_str, [])
 
-        if labels:
-            labels_sorted = sorted(
-                labels,
+        if entries:
+            entries_sorted = sorted(
+                entries,
                 key=lambda x: (
-                    1 if _is_secondary_subject(x) else 0,
-                    x.lower(),
+                    1 if _is_secondary_subject(x[1]) else 0,
+                    x[0].lower(),
                 ),
             )
+            labels_sorted = [label for label, _raw in entries_sorted]
             joined = " / ".join(labels_sorted)
 
             if time_str:
