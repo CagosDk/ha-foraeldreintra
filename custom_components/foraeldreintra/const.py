@@ -9,43 +9,46 @@ PLATFORMS = ["sensor"]
 # Options
 OPT_SELECTED_CHILDREN = "selected_children"
 
+OPT_DISPLAY_PERIOD = "display_period"
+DEFAULT_DISPLAY_PERIOD = "today_and_future"
+
+# Lektier
 OPT_SHOW_HOMEWORK_SENSORS = "show_homework_sensors"
 DEFAULT_SHOW_HOMEWORK_SENSORS = True
 
 OPT_ADD_HOMEWORK_MARKDOWN = "add_homework_markdown"
 DEFAULT_ADD_HOMEWORK_MARKDOWN = False
 
+# Ugeplan - sensorer
 OPT_SHOW_WEEKPLAN_SENSORS = "show_weekplan_sensors"
 DEFAULT_SHOW_WEEKPLAN_SENSORS = True
 
 OPT_SHOW_WEEKPLAN_GENERAL_SENSORS = "show_weekplan_general_sensors"
 DEFAULT_SHOW_WEEKPLAN_GENERAL_SENSORS = False
 
+OPT_SHOW_WEEKPLAN_FOCUS_SENSORS = "show_weekplan_focus_sensors"
+DEFAULT_SHOW_WEEKPLAN_FOCUS_SENSORS = False
+
 OPT_SHOW_WEEKPLAN_SCHEDULE_SENSORS = "show_weekplan_schedule_sensors"
 DEFAULT_SHOW_WEEKPLAN_SCHEDULE_SENSORS = False
 
-OPT_ADD_WEEKPLAN_MARKDOWN = "add_weekplan_markdown"
-DEFAULT_ADD_WEEKPLAN_MARKDOWN = True
+# Ugeplan - indhold i samlet ugeplan
+OPT_INCLUDE_WEEKPLAN_GENERAL = "include_weekplan_general"
+DEFAULT_INCLUDE_WEEKPLAN_GENERAL = True
+
+OPT_INCLUDE_WEEKPLAN_FOCUS = "include_weekplan_focus"
+DEFAULT_INCLUDE_WEEKPLAN_FOCUS = True
 
 OPT_INCLUDE_WEEKPLAN_SCHEDULE = "include_weekplan_schedule"
 DEFAULT_INCLUDE_WEEKPLAN_SCHEDULE = True
 
-OPT_INCLUDE_WEEKPLAN_GENERAL = "include_weekplan_general"
-DEFAULT_INCLUDE_WEEKPLAN_GENERAL = True
+# Markdown
+OPT_ADD_WEEKPLAN_MARKDOWN = "add_weekplan_markdown"
+DEFAULT_ADD_WEEKPLAN_MARKDOWN = True
 
+# Tilpasning
 OPT_SUBJECT_ALIASES = "subject_aliases"
 DEFAULT_SUBJECT_ALIASES = ""
 
-OPT_AUTO_REMOVE_UNSELECTED = "auto_remove_unselected"
-DEFAULT_AUTO_REMOVE_UNSELECTED = False
-
-OPT_DISPLAY_PERIOD = "display_period"
-DEFAULT_DISPLAY_PERIOD = "today_and_future"
-
-OPT_SCAN_MODE = "scan_mode"
-OPT_SCAN_INTERVAL_MINUTES = "scan_interval_minutes"
-OPT_SCAN_TIMES = "scan_times"
-
-DEFAULT_SCAN_MODE = "interval"
-DEFAULT_SCAN_INTERVAL_MINUTES = 15
-DEFAULT_SCAN_TIMES = ""
+# Intern fast polling
+DEFAULT_SCAN_INTERVAL_MINUTES = 60
