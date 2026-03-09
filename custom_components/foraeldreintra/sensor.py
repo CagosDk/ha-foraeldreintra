@@ -85,6 +85,25 @@ SECONDARY_SUBJECTS = {
     "EKSTRA",
 }
 
+STANDARD_SUBJECT_ALIASES = {
+    "DAN": "Dansk",
+    "MAT": "Matematik",
+    "ENG": "Engelsk",
+    "IDR": "Idræt",
+    "BIL": "Billedkunst",
+    "MUS": "Musik",
+    "SVØM": "Svømning",
+    "N/T": "Natur/Teknologi",
+    "KRIS": "Kristendomskundskab",
+    "KLA": "Klassens tid",
+    "BOOS": "Booster",
+    "PÆD": "Pædagog",
+    "KOR": "Kor",
+    "STØTTE": "Støtte",
+    "CO-TEACHER": "Co-teacher",
+    "MASTER": "Master Class",
+}
+
 
 def _parse_iso_date(s: str | None) -> date | None:
     if not s:
@@ -311,8 +330,7 @@ def _looks_like_date_heading(text: str) -> bool:
         return True
 
     if re.match(
-        r"^(Mandag|Tirsdag|Onsdag|Torsdag|Fredag|Lørdag|Søndag),\s*"
-        r".*:$",
+        r"^(Mandag|Tirsdag|Onsdag|Torsdag|Fredag|Lørdag|Søndag),\s*.*:$",
         s,
         re.IGNORECASE,
     ):
@@ -628,7 +646,10 @@ class ForaeldreIntraBaseSensor(CoordinatorEntity[ForaldreIntraCoordinator], Sens
 
     def _subject_alias_map(self) -> dict[str, str]:
         raw = self._entry.options.get(OPT_SUBJECT_ALIASES, DEFAULT_SUBJECT_ALIASES)
-        return _parse_subject_aliases(raw)
+        user_aliases = _parse_subject_aliases(raw)
+        merged = dict(STANDARD_SUBJECT_ALIASES)
+        merged.update(user_aliases)
+        return merged
 
 
 class ForaeldreIntraAllHomeworkSensor(ForaeldreIntraBaseSensor):
@@ -740,9 +761,6 @@ class ForaeldreIntraChildWeekplanSensor(ForaeldreIntraBaseSensor):
         items = plan.get("items", [])
         days = plan.get("days", [])
 
-        if not include_general:
-            items = [x for x in items if x.get("type") != "general"]
-
         filtered_days = []
         for day in days:
             new_day = dict(day)
@@ -754,13 +772,15 @@ class ForaeldreIntraChildWeekplanSensor(ForaeldreIntraBaseSensor):
             if new_day.get("lesson_plans") or new_day.get("schedule"):
                 filtered_days.append(new_day)
 
+        filtered_items = items if include_general else [x for x in items if x.get("type") != "general"]
+
         attrs: dict[str, Any] = {
             "barn": self._child,
             "title": _build_display_title(plan),
             "week": _week_short(plan.get("week")),
             "url": plan.get("url"),
             "class_or_group": plan.get("class_or_group"),
-            "items": items,
+            "items": filtered_items,
             "days": filtered_days,
         }
 
@@ -770,7 +790,7 @@ class ForaeldreIntraChildWeekplanSensor(ForaeldreIntraBaseSensor):
                     "title": plan.get("title"),
                     "week": plan.get("week"),
                     "class_or_group": plan.get("class_or_group"),
-                    "items": items,
+                    "items": filtered_items,
                     "days": filtered_days,
                 },
                 include_general=include_general,
