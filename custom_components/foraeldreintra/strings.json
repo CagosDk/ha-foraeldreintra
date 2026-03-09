@@ -24,30 +24,23 @@
     "step": {
       "init": {
         "title": "Options",
-        "description": "Choose children, display options and refresh behavior.",
+        "description": "Choose children and what should be exposed.",
         "data": {
           "selected_children": "Children",
           "display_period": "Display period",
           "show_homework_sensors": "Show homework sensors",
           "add_homework_markdown": "Add markdown to homework",
+          "include_weekplan_general": "Include General in combined weekly plan",
+          "include_weekplan_focus": "Include Focus in combined weekly plan",
+          "include_weekplan_schedule": "Include Schedule in combined weekly plan",
           "show_weekplan_sensors": "Show combined weekly plan sensor",
           "show_weekplan_general_sensors": "Show separate weekly plan general sensor",
+          "show_weekplan_focus_sensors": "Show separate weekly plan focus sensor",
           "show_weekplan_schedule_sensors": "Show separate weekly plan schedule sensor",
           "add_weekplan_markdown": "Add markdown to weekly plan",
-          "include_weekplan_schedule": "Include schedule in combined weekly plan",
-          "include_weekplan_general": "Include general section in combined weekly plan",
-          "subject_aliases": "Subject aliases (one per line, e.g. BOOS=Booster)",
-          "auto_remove_unselected": "Automatically remove unselected sensors",
-          "scan_mode": "Refresh mode",
-          "scan_interval_minutes": "Interval minutes",
-          "scan_times": "Fixed times (CSV, e.g. 06:30,12:00,18:30)"
+          "subject_aliases": "Subject aliases (e.g. BOOS=Booster, SVØM=Svømning, MAS=)"
         }
       }
-    },
-    "error": {
-      "required": "Required",
-      "invalid_time": "Invalid format. Use HH:MM separated by commas.",
-      "invalid_range": "Invalid value"
     }
   }
 }
