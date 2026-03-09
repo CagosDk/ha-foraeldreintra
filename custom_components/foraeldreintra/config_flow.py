@@ -216,7 +216,6 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                         DEFAULT_ADD_HOMEWORK_MARKDOWN,
                     )
                 )
-
                 cleaned[OPT_SHOW_WEEKPLAN_SENSORS] = bool(
                     cleaned.get(
                         OPT_SHOW_WEEKPLAN_SENSORS,
@@ -256,7 +255,6 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 cleaned[OPT_SUBJECT_ALIASES] = str(
                     cleaned.get(OPT_SUBJECT_ALIASES, "") or ""
                 ).strip()
-
                 cleaned[OPT_AUTO_REMOVE_UNSELECTED] = bool(
                     cleaned.get(
                         OPT_AUTO_REMOVE_UNSELECTED,
@@ -324,7 +322,6 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 default=add_homework_markdown_default,
             )
         ] = bool
-
         schema_dict[
             vol.Required(
                 OPT_SHOW_WEEKPLAN_SENSORS,
@@ -367,7 +364,6 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 default=subject_aliases_default,
             )
         ] = str
-
         schema_dict[
             vol.Required(
                 OPT_AUTO_REMOVE_UNSELECTED,
