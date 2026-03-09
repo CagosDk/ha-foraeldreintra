@@ -165,11 +165,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         )
 
         subject_aliases_default = str(
-            existing.get(
-                OPT_SUBJECT_ALIASES,
-                DEFAULT_SUBJECT_ALIASES,
-            )
-            or ""
+            existing.get(OPT_SUBJECT_ALIASES, DEFAULT_SUBJECT_ALIASES) or ""
         )
 
         auto_remove_default = bool(
@@ -366,7 +362,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             )
         ] = bool
         schema_dict[
-            vol.Required(
+            vol.Optional(
                 OPT_SUBJECT_ALIASES,
                 default=subject_aliases_default,
             )
