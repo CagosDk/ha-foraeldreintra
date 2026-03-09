@@ -5,14 +5,14 @@
         "title": "ForældreIntra",
         "description": "Indtast dine oplysninger for at hente ugeplan og lektier.",
         "data": {
-          "school_url": "Skolens URL (fx https://xxxx.m.skoleintra.dk/)",
+          "school_url": "Skolens URL",
           "username": "Brugernavn",
           "password": "Adgangskode"
         }
       }
     },
     "error": {
-      "auth": "Login fejlede. Tjek brugernavn/adgangskode og skolens URL.",
+      "auth": "Login fejlede. Tjek brugernavn, adgangskode og skolens URL.",
       "cannot_connect": "Kunne ikke hente data. Prøv igen senere.",
       "unknown": "Ukendt fejl."
     },
@@ -28,9 +28,13 @@
         "data": {
           "selected_children": "Børn",
           "display_period": "Visningsperiode",
-          "add_markdown": "Tilføj markdown-attribut (til dashboard)",
-          "show_all_sensor": "Vis \"alle\"-sensor",
-          "auto_remove_unselected": "Auto-fjern fravalgte sensorer",
+          "show_homework_sensors": "Vis lektie-sensorer",
+          "add_homework_markdown": "Tilføj markdown til lektier",
+          "show_weekplan_sensors": "Vis ugeplan-sensorer",
+          "add_weekplan_markdown": "Tilføj markdown til ugeplan",
+          "include_weekplan_schedule": "Medtag skema i ugeplan",
+          "include_weekplan_general": "Medtag generelt i ugeplan",
+          "auto_remove_unselected": "Fjern automatisk sensorer for fravalgte børn",
           "scan_mode": "Opdateringsmetode",
           "scan_interval_minutes": "Interval (minutter)",
           "scan_times": "Faste tidspunkter (CSV, fx 06:30,12:00,18:30)"
@@ -39,7 +43,7 @@
     },
     "error": {
       "required": "Skal udfyldes",
-      "invalid_time": "Ugyldigt format. Brug HH:MM, adskil med komma.",
+      "invalid_time": "Ugyldigt format. Brug HH:MM adskilt med komma.",
       "invalid_range": "Ugyldig værdi"
     }
   }
