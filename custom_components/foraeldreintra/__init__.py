@@ -5,15 +5,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import slugify
 
-from .const import (
-    DEFAULT_AUTO_REMOVE_UNSELECTED,
-    DEFAULT_SHOW_HOMEWORK_SENSORS,
-    DOMAIN,
-    OPT_AUTO_REMOVE_UNSELECTED,
-    OPT_SELECTED_CHILDREN,
-    OPT_SHOW_HOMEWORK_SENSORS,
-    PLATFORMS,
-)
+from .const import DOMAIN, PLATFORMS, OPT_SELECTED_CHILDREN
 from .coordinator import ForaldreIntraCoordinator
 
 
@@ -30,28 +22,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data[DOMAIN][entry.entry_id] = coordinator
 
     async def _remove_unselected_entities(updated_entry: ConfigEntry) -> None:
-        """Fjern entities fra entity registry (opt-in)."""
+        """Fjern entities fra entity registry som ikke længere er valgt."""
         reg = er.async_get(hass)
-
-        show_homework = bool(
-            updated_entry.options.get(
-                OPT_SHOW_HOMEWORK_SENSORS,
-                DEFAULT_SHOW_HOMEWORK_SENSORS,
-            )
-        )
-        if not show_homework:
-            unique = f"{entry.entry_id}_homework_all"
-            entity_id = reg.async_get_entity_id("sensor", DOMAIN, unique)
-            if entity_id:
-                reg.async_remove(entity_id)
 
         selected_names = set(updated_entry.options.get(OPT_SELECTED_CHILDREN, []))
         selected_slugs = {slugify(n) for n in selected_names}
 
-        homework_prefix = f"{entry.entry_id}_homework_"
-        weekplan_prefix = f"{entry.entry_id}_weekplan_"
-        weekplan_general_prefix = f"{entry.entry_id}_weekplan_general_"
-        weekplan_schedule_prefix = f"{entry.entry_id}_weekplan_schedule_"
+        prefixes = [
+            f"{entry.entry_id}_homework_",
+            f"{entry.entry_id}_weekplan_",
+            f"{entry.entry_id}_weekplan_general_",
+            f"{entry.entry_id}_weekplan_focus_",
+            f"{entry.entry_id}_weekplan_schedule_",
+        ]
         all_homework_unique = f"{entry.entry_id}_homework_all"
 
         for entity in list(reg.entities.values()):
@@ -61,21 +44,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 continue
             if not entity.unique_id:
                 continue
-
             if entity.unique_id == all_homework_unique:
                 continue
 
             child_slug: str | None = None
 
-            if entity.unique_id.startswith(weekplan_general_prefix):
-                child_slug = entity.unique_id.replace(weekplan_general_prefix, "", 1)
-            elif entity.unique_id.startswith(weekplan_schedule_prefix):
-                child_slug = entity.unique_id.replace(weekplan_schedule_prefix, "", 1)
-            elif entity.unique_id.startswith(homework_prefix):
-                child_slug = entity.unique_id.replace(homework_prefix, "", 1)
-            elif entity.unique_id.startswith(weekplan_prefix):
-                child_slug = entity.unique_id.replace(weekplan_prefix, "", 1)
-            else:
+            for prefix in prefixes:
+                if entity.unique_id.startswith(prefix):
+                    child_slug = entity.unique_id.replace(prefix, "", 1)
+                    break
+
+            if child_slug is None:
                 continue
 
             if not selected_slugs:
@@ -89,13 +68,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if updated_entry.entry_id != entry.entry_id:
             return
 
-        if bool(
-            updated_entry.options.get(
-                OPT_AUTO_REMOVE_UNSELECTED,
-                DEFAULT_AUTO_REMOVE_UNSELECTED,
-            )
-        ):
-            await _remove_unselected_entities(updated_entry)
+        await _remove_unselected_entities(updated_entry)
 
         if hasattr(coordinator, "async_update_options"):
             await coordinator.async_update_options(updated_entry)
