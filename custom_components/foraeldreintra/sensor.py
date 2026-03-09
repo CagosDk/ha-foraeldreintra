@@ -18,7 +18,10 @@ from .const import (
     DEFAULT_INCLUDE_WEEKPLAN_GENERAL,
     DEFAULT_INCLUDE_WEEKPLAN_SCHEDULE,
     DEFAULT_SHOW_HOMEWORK_SENSORS,
+    DEFAULT_SHOW_WEEKPLAN_GENERAL_SENSORS,
+    DEFAULT_SHOW_WEEKPLAN_SCHEDULE_SENSORS,
     DEFAULT_SHOW_WEEKPLAN_SENSORS,
+    DEFAULT_SUBJECT_ALIASES,
     DOMAIN,
     OPT_ADD_HOMEWORK_MARKDOWN,
     OPT_ADD_WEEKPLAN_MARKDOWN,
@@ -27,7 +30,10 @@ from .const import (
     OPT_INCLUDE_WEEKPLAN_SCHEDULE,
     OPT_SELECTED_CHILDREN,
     OPT_SHOW_HOMEWORK_SENSORS,
+    OPT_SHOW_WEEKPLAN_GENERAL_SENSORS,
+    OPT_SHOW_WEEKPLAN_SCHEDULE_SENSORS,
     OPT_SHOW_WEEKPLAN_SENSORS,
+    OPT_SUBJECT_ALIASES,
 )
 from .coordinator import ForaldreIntraCoordinator
 
@@ -49,7 +55,6 @@ DK_MONTH = [
 
 SECTION_DIVIDER = "<hr>"
 
-# Fag/roller som helst skal stå EFTER “almindelige” fag
 SECONDARY_SUBJECTS = {
     "STØTTE",
     "PÆD",
@@ -123,21 +128,42 @@ def _format_header(date_iso: str) -> str:
     return f"# {wd} d.{d.day} {DK_MONTH[d.month - 1]} {d.year}"
 
 
-def _normalize_schedule_label(row: dict[str, Any]) -> str:
-    """Vælg bedste label for en skema-række.
+def _parse_subject_aliases(raw: str | None) -> dict[str, str]:
+    aliases: dict[str, str] = {}
+    if not raw:
+        return aliases
 
-    Prioritet lige nu:
-    1) subject_full
-    2) subject_short
-    3) title
+    text = raw.replace(";", "\n").replace(",", "\n")
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or "=" not in line:
+            continue
 
-    Det giver typisk 'Matematik' fremfor 'MAT'.
-    """
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+
+        if key and value:
+            aliases[key.upper()] = value
+
+    return aliases
+
+
+def _apply_subject_alias(label: str, alias_map: dict[str, str]) -> str:
+    cleaned = (label or "").strip()
+    if not cleaned:
+        return ""
+
+    return alias_map.get(cleaned.upper(), cleaned)
+
+
+def _normalize_schedule_label(row: dict[str, Any], alias_map: dict[str, str]) -> str:
     subject_full = (row.get("subject_full") or "").strip()
     subject_short = (row.get("subject_short") or "").strip()
     title_str = (row.get("title") or "").strip()
 
     label = subject_full or subject_short or title_str
+    label = _apply_subject_alias(label, alias_map)
     return label.strip()
 
 
@@ -148,21 +174,16 @@ def _is_secondary_subject(label: str) -> bool:
     return label_upper in SECONDARY_SUBJECTS
 
 
-def _combine_schedule_rows(schedule_rows: list[dict[str, Any]]) -> list[str]:
-    """Saml flere fag på samme tidspunkt til én linje.
-
-    Eksempel:
-    - 10:05 - 10:50 — Dansk
-    - 10:05 - 10:50 — CO-TEACHER
-    bliver til:
-    - 10:05 - 10:50 — Dansk / CO-TEACHER
-    """
+def _combine_schedule_rows(
+    schedule_rows: list[dict[str, Any]],
+    alias_map: dict[str, str],
+) -> list[str]:
     grouped: dict[str, list[str]] = {}
     order: list[str] = []
 
     for row in schedule_rows:
         time_str = (row.get("time") or "").strip()
-        label = _normalize_schedule_label(row)
+        label = _normalize_schedule_label(row, alias_map)
 
         if not time_str and not label:
             continue
@@ -270,6 +291,7 @@ def _build_weekplan_markdown(
     plan: dict[str, Any],
     include_general: bool,
     include_schedule: bool,
+    alias_map: dict[str, str],
 ) -> str:
     title = (plan.get("title") or "").strip()
     items = plan.get("items") or []
@@ -293,13 +315,13 @@ def _build_weekplan_markdown(
     has_day_section = bool(visible_days)
 
     if has_general_section:
-        if title:
-            markdown_parts.append(SECTION_DIVIDER)
         markdown_parts.append("## Generelt")
 
         for idx, item in enumerate(general_items):
-            subject = (item.get("subject") or "").strip()
-            if subject and subject != "Generelt":
+            subject_raw = (item.get("subject") or "").strip()
+            subject = _apply_subject_alias(subject_raw, alias_map)
+
+            if subject and subject.lower() not in {"generelt", "(uden angivelse af fag)"}:
                 markdown_parts.append(f"### {subject}")
 
             if item.get("content_text"):
@@ -324,8 +346,10 @@ def _build_weekplan_markdown(
 
         lesson_plans = day.get("lesson_plans", [])
         for lesson_idx, lesson in enumerate(lesson_plans):
-            subject = (lesson.get("subject") or "Generelt").strip()
-            day_parts.append(f"### {subject}")
+            subject = _apply_subject_alias((lesson.get("subject") or "Generelt").strip(), alias_map)
+            if subject and subject.lower() not in {"generelt", "(uden angivelse af fag)"}:
+                day_parts.append(f"### {subject}")
+
             if lesson.get("content_text"):
                 day_parts.append(lesson["content_text"])
 
@@ -333,7 +357,7 @@ def _build_weekplan_markdown(
                 day_parts.append(SECTION_DIVIDER)
 
         if include_schedule:
-            schedule_lines = _combine_schedule_rows(day.get("schedule", []))
+            schedule_lines = _combine_schedule_rows(day.get("schedule", []), alias_map)
 
             if schedule_lines:
                 if lesson_plans:
@@ -347,6 +371,29 @@ def _build_weekplan_markdown(
             markdown_parts.append(SECTION_DIVIDER)
 
     return "\n\n".join(part for part in markdown_parts if part).strip() or "Ingen ugeplan fundet."
+
+
+def _plan_general_only(plan: dict[str, Any]) -> dict[str, Any]:
+    items = [x for x in (plan.get("items") or []) if x.get("type") == "general"]
+    return {
+        "title": plan.get("title"),
+        "week": plan.get("week"),
+        "url": plan.get("url"),
+        "class_or_group": plan.get("class_or_group"),
+        "items": items,
+        "days": [],
+    }
+
+
+def _plan_schedule_only(plan: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "title": plan.get("title"),
+        "week": plan.get("week"),
+        "url": plan.get("url"),
+        "class_or_group": plan.get("class_or_group"),
+        "items": [],
+        "days": plan.get("days") or [],
+    }
 
 
 async def async_setup_entry(
@@ -367,6 +414,18 @@ async def async_setup_entry(
     show_weekplan = bool(
         entry.options.get(OPT_SHOW_WEEKPLAN_SENSORS, DEFAULT_SHOW_WEEKPLAN_SENSORS)
     )
+    show_weekplan_general_sensors = bool(
+        entry.options.get(
+            OPT_SHOW_WEEKPLAN_GENERAL_SENSORS,
+            DEFAULT_SHOW_WEEKPLAN_GENERAL_SENSORS,
+        )
+    )
+    show_weekplan_schedule_sensors = bool(
+        entry.options.get(
+            OPT_SHOW_WEEKPLAN_SCHEDULE_SENSORS,
+            DEFAULT_SHOW_WEEKPLAN_SCHEDULE_SENSORS,
+        )
+    )
 
     if show_homework:
         entities.append(ForaeldreIntraAllHomeworkSensor(coordinator, entry))
@@ -381,6 +440,12 @@ async def async_setup_entry(
         if show_weekplan:
             entities.append(ForaeldreIntraChildWeekplanSensor(coordinator, entry, child_name))
 
+        if show_weekplan_general_sensors:
+            entities.append(ForaeldreIntraChildWeekplanGeneralSensor(coordinator, entry, child_name))
+
+        if show_weekplan_schedule_sensors:
+            entities.append(ForaeldreIntraChildWeekplanScheduleSensor(coordinator, entry, child_name))
+
     async_add_entities(entities)
 
 
@@ -392,6 +457,10 @@ class ForaeldreIntraBaseSensor(CoordinatorEntity[ForaldreIntraCoordinator], Sens
     @property
     def available(self) -> bool:
         return self.coordinator.last_update_success
+
+    def _subject_alias_map(self) -> dict[str, str]:
+        raw = self._entry.options.get(OPT_SUBJECT_ALIASES, DEFAULT_SUBJECT_ALIASES)
+        return _parse_subject_aliases(raw)
 
 
 class ForaeldreIntraAllHomeworkSensor(ForaeldreIntraBaseSensor):
@@ -529,6 +598,89 @@ class ForaeldreIntraChildWeekplanSensor(ForaeldreIntraBaseSensor):
                 },
                 include_general=include_general,
                 include_schedule=include_schedule,
+                alias_map=self._subject_alias_map(),
+            )
+
+        return attrs
+
+
+class ForaeldreIntraChildWeekplanGeneralSensor(ForaeldreIntraBaseSensor):
+    _attr_icon = "mdi:text-box-outline"
+
+    def __init__(self, coordinator: ForaldreIntraCoordinator, entry: ConfigEntry, child_name: str) -> None:
+        super().__init__(coordinator, entry)
+        self._child = child_name
+        self._attr_name = f"ForældreIntra ugeplan generelt ({child_name})"
+        self._attr_unique_id = f"{entry.entry_id}_weekplan_general_{slugify(child_name)}"
+
+    @property
+    def native_value(self) -> str:
+        weeklyplans = (self.coordinator.data or {}).get("weeklyplans", {})
+        plan = weeklyplans.get(self._child, {})
+        return plan.get("week") or "ingen"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        weeklyplans = (self.coordinator.data or {}).get("weeklyplans", {})
+        plan = _plan_general_only(dict(weeklyplans.get(self._child, {}) or {}))
+
+        attrs: dict[str, Any] = {
+            "barn": self._child,
+            "title": plan.get("title"),
+            "week": plan.get("week"),
+            "url": plan.get("url"),
+            "class_or_group": plan.get("class_or_group"),
+            "items": plan.get("items", []),
+            "days": [],
+        }
+
+        if bool(self._entry.options.get(OPT_ADD_WEEKPLAN_MARKDOWN, DEFAULT_ADD_WEEKPLAN_MARKDOWN)):
+            attrs["markdown"] = _build_weekplan_markdown(
+                plan,
+                include_general=True,
+                include_schedule=False,
+                alias_map=self._subject_alias_map(),
+            )
+
+        return attrs
+
+
+class ForaeldreIntraChildWeekplanScheduleSensor(ForaeldreIntraBaseSensor):
+    _attr_icon = "mdi:calendar-clock"
+
+    def __init__(self, coordinator: ForaldreIntraCoordinator, entry: ConfigEntry, child_name: str) -> None:
+        super().__init__(coordinator, entry)
+        self._child = child_name
+        self._attr_name = f"ForældreIntra ugeplan skema ({child_name})"
+        self._attr_unique_id = f"{entry.entry_id}_weekplan_schedule_{slugify(child_name)}"
+
+    @property
+    def native_value(self) -> str:
+        weeklyplans = (self.coordinator.data or {}).get("weeklyplans", {})
+        plan = weeklyplans.get(self._child, {})
+        return plan.get("week") or "ingen"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        weeklyplans = (self.coordinator.data or {}).get("weeklyplans", {})
+        plan = _plan_schedule_only(dict(weeklyplans.get(self._child, {}) or {}))
+
+        attrs: dict[str, Any] = {
+            "barn": self._child,
+            "title": plan.get("title"),
+            "week": plan.get("week"),
+            "url": plan.get("url"),
+            "class_or_group": plan.get("class_or_group"),
+            "items": [],
+            "days": plan.get("days", []),
+        }
+
+        if bool(self._entry.options.get(OPT_ADD_WEEKPLAN_MARKDOWN, DEFAULT_ADD_WEEKPLAN_MARKDOWN)):
+            attrs["markdown"] = _build_weekplan_markdown(
+                plan,
+                include_general=False,
+                include_schedule=True,
+                alias_map=self._subject_alias_map(),
             )
 
         return attrs
