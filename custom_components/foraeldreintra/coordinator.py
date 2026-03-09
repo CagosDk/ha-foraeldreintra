@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 import logging
-import re
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.helpers.event import async_track_time_change
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import ForaldreIntraClient, ForaldreIntraAuthError, ForaldreIntraError
@@ -16,33 +14,10 @@ from .const import (
     CONF_SCHOOL_URL,
     CONF_USERNAME,
     DEFAULT_SCAN_INTERVAL_MINUTES,
-    DEFAULT_SCAN_MODE,
-    DEFAULT_SCAN_TIMES,
     DOMAIN,
-    OPT_SCAN_INTERVAL_MINUTES,
-    OPT_SCAN_MODE,
-    OPT_SCAN_TIMES,
 )
 
 _LOGGER = logging.getLogger(__name__)
-
-
-def _parse_times_csv(csv: str) -> list[tuple[int, int]]:
-    parts = [p.strip() for p in (csv or "").split(",") if p.strip()]
-    times: list[tuple[int, int]] = []
-
-    for p in parts:
-        if not re.match(r"^\d{2}:\d{2}$", p):
-            continue
-
-        hh, mm = p.split(":")
-        h = int(hh)
-        m = int(mm)
-
-        if 0 <= h <= 23 and 0 <= m <= 59:
-            times.append((h, m))
-
-    return sorted(set(times))
 
 
 class ForaldreIntraCoordinator(DataUpdateCoordinator[dict]):
@@ -55,7 +30,6 @@ class ForaldreIntraCoordinator(DataUpdateCoordinator[dict]):
             password=entry.data[CONF_PASSWORD],
             school_url=entry.data[CONF_SCHOOL_URL],
         )
-        self._unsubs: list[callable] = []
 
         super().__init__(
             hass,
@@ -64,57 +38,8 @@ class ForaldreIntraCoordinator(DataUpdateCoordinator[dict]):
             update_interval=timedelta(minutes=DEFAULT_SCAN_INTERVAL_MINUTES),
         )
 
-        self._apply_schedule_from_options()
-
-    def _clear_schedules(self) -> None:
-        for unsub in self._unsubs:
-            try:
-                unsub()
-            except Exception:
-                pass
-        self._unsubs = []
-
-    def _apply_schedule_from_options(self) -> None:
-        self._clear_schedules()
-
-        scan_mode = self.entry.options.get(OPT_SCAN_MODE, DEFAULT_SCAN_MODE)
-
-        if scan_mode == "fixed_times":
-            self.update_interval = None
-            csv = self.entry.options.get(OPT_SCAN_TIMES, DEFAULT_SCAN_TIMES)
-            times = _parse_times_csv(csv)
-
-            if not times:
-                self.update_interval = timedelta(minutes=DEFAULT_SCAN_INTERVAL_MINUTES)
-                return
-
-            for hour, minute in times:
-                unsub = async_track_time_change(
-                    self.hass,
-                    self._scheduled_refresh,
-                    hour=hour,
-                    minute=minute,
-                    second=0,
-                )
-                self._unsubs.append(unsub)
-        else:
-            minutes = int(
-                self.entry.options.get(
-                    OPT_SCAN_INTERVAL_MINUTES,
-                    DEFAULT_SCAN_INTERVAL_MINUTES,
-                )
-            )
-            if minutes < 1 or minutes > 1440:
-                minutes = DEFAULT_SCAN_INTERVAL_MINUTES
-
-            self.update_interval = timedelta(minutes=minutes)
-
-    async def _scheduled_refresh(self, now: datetime) -> None:
-        self.async_request_refresh()
-
     async def async_update_options(self, new_entry: ConfigEntry) -> None:
         self.entry = new_entry
-        self._apply_schedule_from_options()
         self.async_request_refresh()
 
     async def _async_update_data(self) -> dict:
@@ -142,4 +67,4 @@ class ForaldreIntraCoordinator(DataUpdateCoordinator[dict]):
         }
 
     async def async_shutdown(self) -> None:
-        self._clear_schedules()
+        return None
