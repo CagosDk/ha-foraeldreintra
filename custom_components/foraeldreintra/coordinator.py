@@ -12,16 +12,16 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .api import ForaldreIntraClient, ForaldreIntraAuthError, ForaldreIntraError
 from .const import (
-    DOMAIN,
+    CONF_PASSWORD,
     CONF_SCHOOL_URL,
     CONF_USERNAME,
-    CONF_PASSWORD,
-    OPT_SCAN_MODE,
-    OPT_SCAN_INTERVAL_MINUTES,
-    OPT_SCAN_TIMES,
-    DEFAULT_SCAN_MODE,
     DEFAULT_SCAN_INTERVAL_MINUTES,
+    DEFAULT_SCAN_MODE,
     DEFAULT_SCAN_TIMES,
+    DOMAIN,
+    OPT_SCAN_INTERVAL_MINUTES,
+    OPT_SCAN_MODE,
+    OPT_SCAN_TIMES,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -38,6 +38,7 @@ def _parse_times_csv(csv: str) -> list[tuple[int, int]]:
         hh, mm = p.split(":")
         h = int(hh)
         m = int(mm)
+
         if 0 <= h <= 23 and 0 <= m <= 59:
             times.append((h, m))
 
@@ -66,9 +67,9 @@ class ForaldreIntraCoordinator(DataUpdateCoordinator[dict]):
         self._apply_schedule_from_options()
 
     def _clear_schedules(self) -> None:
-        for u in self._unsubs:
+        for unsub in self._unsubs:
             try:
-                u()
+                unsub()
             except Exception:  # noqa: BLE001
                 pass
         self._unsubs = []
@@ -83,21 +84,19 @@ class ForaldreIntraCoordinator(DataUpdateCoordinator[dict]):
             csv = self.entry.options.get(OPT_SCAN_TIMES, DEFAULT_SCAN_TIMES)
             times = _parse_times_csv(csv)
 
-            # fallback hvis ingen tider er angivet
             if not times:
                 self.update_interval = timedelta(minutes=DEFAULT_SCAN_INTERVAL_MINUTES)
                 return
 
-            for (h, m) in times:
+            for hour, minute in times:
                 unsub = async_track_time_change(
                     self.hass,
                     self._scheduled_refresh,
-                    hour=h,
-                    minute=m,
+                    hour=hour,
+                    minute=minute,
                     second=0,
                 )
                 self._unsubs.append(unsub)
-
         else:
             minutes = int(
                 self.entry.options.get(
@@ -114,7 +113,6 @@ class ForaldreIntraCoordinator(DataUpdateCoordinator[dict]):
         self.async_request_refresh()
 
     async def async_update_options(self, new_entry: ConfigEntry) -> None:
-        # Opdater entry reference + schedule, og hent data NU
         self.entry = new_entry
         self._apply_schedule_from_options()
         self.async_request_refresh()
@@ -128,16 +126,14 @@ class ForaldreIntraCoordinator(DataUpdateCoordinator[dict]):
             raise UpdateFailed(f"Ukendt fejl: {err}") from err
 
     async def _fetch_children_and_homework(self) -> dict:
-        # Prøv først uden login (kan være tomt ved kold start)
         children = await self.client.get_children()
 
-        # Hvis ingen børn -> login og prøv igen
         if not children:
             await self.client.login()
             children = await self.client.get_children()
 
         items = await self.client.get_homework_for_children(children)
-        weeklyplans = await self.client.get_weekplans_for_children(children)
+        weeklyplans = await self.client.get_latest_weekplans_for_children(children)
 
         return {
             "children": [{"id": c.id, "name": c.name} for c in children],
