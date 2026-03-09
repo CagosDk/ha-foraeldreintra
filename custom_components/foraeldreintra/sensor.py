@@ -123,7 +123,7 @@ def _build_homework_markdown(items: list[dict[str, Any]]) -> str:
             continue
 
         if not fag and tekst:
-            m = re.match(r"^([A-ZÆØÅ0-9 .\\-]{2,30}):\\s*([\\s\\S]*)$", tekst)
+            m = re.match(r"^([A-ZÆØÅ0-9 .\-]{2,30}):\s*([\s\S]*)$", tekst)
             if m:
                 fag = m.group(1).strip()
                 tekst = (m.group(2) or "").strip()
@@ -140,30 +140,35 @@ def _build_homework_markdown(items: list[dict[str, Any]]) -> str:
             t = (l.get("tekst") or "link").strip()
             u = (l.get("url") or "").strip()
             if u:
-                block += f"\\n- [{t}]({u})"
+                if block:
+                    block += "\n"
+                block += f"- [{t}]({u})"
 
         by_date[dato][barn][fag].append(block.strip())
 
     dates = sorted([d for d in by_date.keys() if d])
-    out = ""
+    parts: list[str] = []
 
-    for i, d_iso in enumerate(dates):
-        if i > 0:
-            out += "\\n\\n---\\n"
-
-        out += f"{_format_header(d_iso)}\\n\\n"
+    for d_iso in dates:
+        day_parts: list[str] = [_format_header(d_iso)]
 
         children = sorted(by_date[d_iso].keys())
         for child in children:
-            out += f"## {child}\\n"
+            child_parts: list[str] = [f"## {child}"]
             subjects = sorted(by_date[d_iso][child].keys())
-            for subject in subjects:
-                out += f"{subject}:\\n"
-                for b in by_date[d_iso][child][subject]:
-                    out += f"{b}\\n\\n"
-            out += "\\n"
 
-    return out.strip() if out.strip() else "Ingen lektier fundet."
+            for subject in subjects:
+                subject_blocks = [f"{subject}:"]
+                for b in by_date[d_iso][child][subject]:
+                    if b:
+                        subject_blocks.append(b)
+                child_parts.append("\n\n".join(subject_blocks))
+
+            day_parts.append("\n\n".join(child_parts))
+
+        parts.append("\n\n".join(day_parts))
+
+    return "\n\n---\n\n".join(parts).strip() if parts else "Ingen lektier fundet."
 
 
 def _build_weekplan_markdown(
@@ -212,22 +217,25 @@ def _build_weekplan_markdown(
         markdown_parts.append("---")
 
     for idx, day in enumerate(visible_days):
+        day_parts: list[str] = []
+
         header = (day.get("day") or "").strip()
         formatted_date = (day.get("formatted_date") or "").strip()
         if formatted_date:
             header = f"{header} {formatted_date}".strip()
 
         if header:
-            markdown_parts.append(f"## {header}")
+            day_parts.append(f"## {header}")
 
-        for lesson_idx, lesson in enumerate(day.get("lesson_plans", [])):
+        lesson_plans = day.get("lesson_plans", [])
+        for lesson_idx, lesson in enumerate(lesson_plans):
             subject = (lesson.get("subject") or "Generelt").strip()
-            markdown_parts.append(f"### {subject}")
+            day_parts.append(f"### {subject}")
             if lesson.get("content_text"):
-                markdown_parts.append(lesson["content_text"])
+                day_parts.append(lesson["content_text"])
 
-            if lesson_idx < len(day.get("lesson_plans", [])) - 1:
-                markdown_parts.append("---")
+            if lesson_idx < len(lesson_plans) - 1:
+                day_parts.append("---")
 
         if include_schedule:
             schedule_lines: list[str] = []
@@ -246,15 +254,17 @@ def _build_weekplan_markdown(
                     schedule_lines.append(f"- {label}")
 
             if schedule_lines:
-                if day.get("lesson_plans"):
-                    markdown_parts.append("---")
-                markdown_parts.append("### Skema")
-                markdown_parts.append("\\n".join(schedule_lines))
+                if lesson_plans:
+                    day_parts.append("---")
+                day_parts.append("### Skema")
+                day_parts.append("\n".join(schedule_lines))
+
+        markdown_parts.append("\n\n".join(day_parts))
 
         if idx < len(visible_days) - 1:
             markdown_parts.append("---")
 
-    return "\\n\\n".join(part for part in markdown_parts if part).strip() or "Ingen ugeplan fundet."
+    return "\n\n".join(part for part in markdown_parts if part).strip() or "Ingen ugeplan fundet."
 
 
 async def async_setup_entry(
