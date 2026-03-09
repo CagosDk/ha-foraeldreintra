@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from aiohttp import ClientSession
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 
 
 class ForaldreIntraAuthError(Exception):
@@ -23,17 +23,7 @@ class Child:
 
 
 class ForaldreIntraClient:
-    """Async klient til ForældreIntra/SkoleIntra mobilsite.
-
-    Flow:
-    - GET /Account/IdpLogin (hent __RequestVerificationToken)
-    - POST credentials
-    - Find og POST SAML-form (action + hidden inputs)
-    - Land på /parent/{childId}/{childName}/...
-    - Find børn i menu + fra URL
-    - Hent lektier via diary -> notes
-    - Hent nyeste publicerede ugeplan via /weeklyplansandhomework/list
-    """
+    """Async klient til ForældreIntra/SkoleIntra mobilsite."""
 
     def __init__(
         self,
@@ -131,10 +121,7 @@ class ForaldreIntraClient:
             self._home_url = final_url
 
     async def get_children(self) -> list[Child]:
-        """Find børn ud fra URL og menu.
-
-        Hvis vi ikke er logget ind, kan listen være tom.
-        """
+        """Find børn ud fra URL og menu."""
         html, url = await self._get_home_html_and_url()
         soup = BeautifulSoup(html, "html.parser")
 
@@ -215,20 +202,61 @@ class ForaldreIntraClient:
         )
         return all_items
 
+    async def get_weekplans_for_children(
+        self,
+        children: list[Child],
+    ) -> dict[str, dict[str, Any]]:
+        """Henter fuld ugeplan for hver valgt elev, baseret på nyeste publicerede ugeplan."""
+        result: dict[str, dict[str, Any]] = {}
+
+        for child in children:
+            plan = await self.get_weekplan_for_child(child)
+            if plan:
+                result[child.name] = plan
+
+        return result
+
+    async def get_latest_weekplans_for_children(
+        self,
+        children: list[Child],
+    ) -> list[dict[str, Any]]:
+        """Beholdes for bagudkompatibilitet."""
+        result: list[dict[str, Any]] = []
+        plans = await self.get_weekplans_for_children(children)
+
+        for child_name, plan in plans.items():
+            result.append(
+                {
+                    "barn": child_name,
+                    "weekplan_id": plan.get("week"),
+                    "title": plan.get("title"),
+                    "url": plan.get("url"),
+                }
+            )
+
+        return result
+
+    async def get_weekplan_for_child(self, child: Child) -> dict[str, Any] | None:
+        """Henter og parser den nyeste publicerede ugeplan for ét barn."""
+        latest = await self.get_latest_weekplan_info_for_child(child)
+        if not latest:
+            return None
+
+        html = await self._get_text(latest["url"])
+        parsed = self._parse_weekplan_page(
+            html=html,
+            weekplan_id=latest["weekplan_id"],
+            fallback_title=latest["title"],
+            url=latest["url"],
+        )
+        parsed["barn"] = child.name
+        return parsed
+
     async def get_latest_weekplan_info_for_child(
         self,
         child: Child,
     ) -> dict[str, Any] | None:
-        """Finder nyeste publicerede ugeplan for ét barn via /list-siden.
-
-        Returnerer fx:
-        {
-            "barn": "Olivia",
-            "weekplan_id": "11-2026",
-            "title": "Plan for 9. mar. 2026 til 13. mar. 2026",
-            "url": "https://.../item/class/11-2026"
-        }
-        """
+        """Finder nyeste publicerede ugeplan for ét barn via /list-siden."""
         list_url = (
             f"{self._base_url}/parent/{child.id}/{child.name}"
             "item/weeklyplansandhomework/list"
@@ -251,27 +279,6 @@ class ForaldreIntraClient:
             "title": latest["title"],
             "url": full_url,
         }
-
-    async def get_latest_weekplan_html_for_child(self, child: Child) -> str | None:
-        """Henter HTML for nyeste publicerede ugeplan for ét barn."""
-        info = await self.get_latest_weekplan_info_for_child(child)
-        if not info:
-            return None
-        return await self._get_text(info["url"])
-
-    async def get_latest_weekplans_for_children(
-        self,
-        children: list[Child],
-    ) -> list[dict[str, Any]]:
-        """Finder nyeste publicerede ugeplan for hver valgt elev."""
-        result: list[dict[str, Any]] = []
-
-        for child in children:
-            info = await self.get_latest_weekplan_info_for_child(child)
-            if info:
-                result.append(info)
-
-        return result
 
     async def _get_home_html_and_url(self) -> tuple[str, str]:
         if self._home_html and self._home_url:
@@ -315,14 +322,7 @@ class ForaldreIntraClient:
         return None
 
     def _extract_latest_weekplan_from_list(self, html: str) -> dict[str, str] | None:
-        """Finder første publicerede ugeplan på /weeklyplansandhomework/list.
-
-        Vi vælger bevidst første link under:
-            ul.sk-weekly-plans-list-container
-
-        Det matcher siden 'Nyeste ugeplaner', hvor nyeste publicerede ugeplan
-        står øverst.
-        """
+        """Finder første publicerede ugeplan på /weeklyplansandhomework/list."""
         soup = BeautifulSoup(html, "html.parser")
 
         container = soup.select_one("ul.sk-weekly-plans-list-container")
@@ -348,12 +348,271 @@ class ForaldreIntraClient:
             "title": title,
         }
 
+    def _parse_weekplan_page(
+        self,
+        html: str,
+        weekplan_id: str,
+        fallback_title: str,
+        url: str,
+    ) -> dict[str, Any]:
+        """Parser ugeplansside til det format sensor.py forventer."""
+        soup = BeautifulSoup(html, "html.parser")
+
+        content_root = (
+            soup.select_one("div.sk-l-content")
+            or soup.select_one("div.sk-l-content-wrapper")
+            or soup.body
+            or soup
+        )
+
+        for tag in content_root.select("script, style, noscript"):
+            tag.decompose()
+
+        title = self._extract_weekplan_title(content_root) or fallback_title
+        class_or_group = self._extract_class_or_group(content_root)
+        days = self._extract_weekplan_days(content_root)
+        items: list[dict[str, Any]] = []
+
+        general_text = self._extract_general_weekplan_text(content_root)
+        if general_text:
+            items.append(
+                {
+                    "type": "general",
+                    "subject": "Generelt",
+                    "content_text": general_text,
+                }
+            )
+
+        for day in days:
+            for lesson in day.get("lesson_plans", []):
+                items.append(
+                    {
+                        "type": "day",
+                        "day": day.get("day"),
+                        "formatted_date": day.get("formatted_date"),
+                        "subject": lesson.get("subject"),
+                        "content_text": lesson.get("content_text"),
+                    }
+                )
+
+        return {
+            "title": title,
+            "week": weekplan_id,
+            "url": url,
+            "class_or_group": class_or_group,
+            "items": items,
+            "days": days,
+        }
+
+    def _extract_weekplan_title(self, root: Tag) -> str | None:
+        for selector in ("h1", "h2", ".sk-page-header", ".sk-page-title"):
+            el = root.select_one(selector)
+            if el:
+                text = self._clean_text(el.get_text(" ", strip=True))
+                if text:
+                    return text
+        return None
+
+    def _extract_class_or_group(self, root: Tag) -> str | None:
+        txt = self._clean_text(root.get_text(" ", strip=True))
+        m = re.search(r"\b(\d{1,2}[A-ZÆØÅa-zæøå])\b", txt)
+        if m:
+            return m.group(1)
+        return None
+
+    def _extract_general_weekplan_text(self, root: Tag) -> str:
+        """Forsøger at finde den generelle tekst i ugeplanen."""
+        candidates: list[str] = []
+
+        selectors = [
+            ".sk-user-input",
+            ".sk-white-box",
+            ".sk-week-plan-content",
+            ".sk-weekly-plan-content",
+        ]
+
+        for selector in selectors:
+            for el in root.select(selector):
+                text = self._clean_multiline_text(el.get_text("\n", strip=True))
+                if text and len(text) > 30:
+                    candidates.append(text)
+
+        if candidates:
+            best = max(candidates, key=len)
+            return best
+
+        return ""
+
+    def _extract_weekplan_days(self, root: Tag) -> list[dict[str, Any]]:
+        days: list[dict[str, Any]] = []
+
+        day_headers = []
+        weekday_re = re.compile(
+            r"^(Mandag|Tirsdag|Onsdag|Torsdag|Fredag|Lørdag|Søndag)\b",
+            re.IGNORECASE,
+        )
+
+        for el in root.find_all(["h2", "h3", "h4", "strong", "b"]):
+            text = self._clean_text(el.get_text(" ", strip=True))
+            if weekday_re.match(text):
+                day_headers.append(el)
+
+        seen_headers: set[str] = set()
+
+        for header in day_headers:
+            header_text = self._clean_text(header.get_text(" ", strip=True))
+            if not header_text or header_text in seen_headers:
+                continue
+            seen_headers.add(header_text)
+
+            day_name, formatted_date = self._split_day_header(header_text)
+            section_nodes = self._collect_until_next_day_header(header, weekday_re)
+
+            lesson_plans: list[dict[str, Any]] = []
+            schedule: list[dict[str, Any]] = []
+
+            section_texts: list[str] = []
+            for node in section_nodes:
+                if getattr(node, "name", None) == "table":
+                    schedule.extend(self._parse_schedule_table(node))
+                else:
+                    txt = self._clean_multiline_text(node.get_text("\n", strip=True))
+                    if txt:
+                        section_texts.append(txt)
+
+            merged_text = "\n\n".join(t for t in section_texts if t).strip()
+            if merged_text:
+                lesson_plans.append(
+                    {
+                        "subject": "Generelt",
+                        "content_text": merged_text,
+                    }
+                )
+
+            if lesson_plans or schedule:
+                days.append(
+                    {
+                        "day": day_name,
+                        "formatted_date": formatted_date,
+                        "lesson_plans": lesson_plans,
+                        "schedule": schedule,
+                    }
+                )
+
+        if days:
+            return days
+
+        schedule_tables = root.find_all("table")
+        flat_schedule: list[dict[str, Any]] = []
+        for table in schedule_tables:
+            flat_schedule.extend(self._parse_schedule_table(table))
+
+        if flat_schedule:
+            days.append(
+                {
+                    "day": "",
+                    "formatted_date": "",
+                    "lesson_plans": [],
+                    "schedule": flat_schedule,
+                }
+            )
+
+        return days
+
+    def _collect_until_next_day_header(self, header: Tag, weekday_re: re.Pattern[str]) -> list[Tag]:
+        nodes: list[Tag] = []
+        node = header.parent if header.parent and header.parent != header else header
+
+        current = node.find_next_sibling()
+        while current:
+            text = self._clean_text(current.get_text(" ", strip=True))
+            if current.name in ("h2", "h3", "h4", "strong", "b") and weekday_re.match(text):
+                break
+
+            inner_header = current.find(["h2", "h3", "h4", "strong", "b"])
+            if inner_header:
+                inner_text = self._clean_text(inner_header.get_text(" ", strip=True))
+                if weekday_re.match(inner_text):
+                    break
+
+            if isinstance(current, Tag):
+                nodes.append(current)
+
+            current = current.find_next_sibling()
+
+        return nodes
+
+    def _parse_schedule_table(self, table: Tag) -> list[dict[str, str]]:
+        rows: list[dict[str, str]] = []
+
+        for tr in table.find_all("tr"):
+            cells = tr.find_all(["td", "th"])
+            values = [self._clean_text(c.get_text(" ", strip=True)) for c in cells]
+            values = [v for v in values if v]
+
+            if len(values) < 2:
+                continue
+
+            time_str = ""
+            subject_short = ""
+            subject_full = ""
+            title = ""
+
+            if re.match(r"^\d{1,2}[:.]\d{2}", values[0]):
+                time_str = values[0]
+                if len(values) >= 2:
+                    subject_short = values[1]
+                if len(values) >= 3:
+                    subject_full = values[2]
+                if len(values) >= 4:
+                    title = values[3]
+            else:
+                subject_short = values[0]
+                if len(values) >= 2:
+                    subject_full = values[1]
+                if len(values) >= 3:
+                    title = values[2]
+
+            if time_str or subject_short or subject_full or title:
+                rows.append(
+                    {
+                        "time": time_str,
+                        "subject_short": subject_short,
+                        "subject_full": subject_full,
+                        "title": title,
+                    }
+                )
+
+        return rows
+
+    def _split_day_header(self, text: str) -> tuple[str, str]:
+        text = self._clean_text(text)
+        m = re.match(
+            r"^(Mandag|Tirsdag|Onsdag|Torsdag|Fredag|Lørdag|Søndag)\s*(.*)$",
+            text,
+            re.IGNORECASE,
+        )
+        if not m:
+            return text, ""
+
+        day = m.group(1).capitalize()
+        rest = (m.group(2) or "").strip(" -–—")
+        return day, rest
+
     def _clean_child_name(self, name: str) -> str:
         """Fjern evt. 'item' suffix fra barnets navn i URL."""
         n = (name or "").strip()
         if n.lower().endswith("item"):
             n = n[:-4]
         return n
+
+    def _clean_text(self, txt: str) -> str:
+        return (txt or "").replace("\xa0", " ").strip()
+
+    def _clean_multiline_text(self, txt: str) -> str:
+        lines = [self._clean_text(line) for line in (txt or "").splitlines()]
+        lines = [line for line in lines if line]
+        return "\n".join(lines).strip()
 
     def _parse_homework_notes(self, html: str) -> list[dict[str, Any]]:
         soup = BeautifulSoup(html, "html.parser")
