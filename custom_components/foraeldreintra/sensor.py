@@ -49,6 +49,18 @@ DK_MONTH = [
 
 SECTION_DIVIDER = "<hr>"
 
+# Fag/roller som helst skal stå EFTER “almindelige” fag
+SECONDARY_SUBJECTS = {
+    "STØTTE",
+    "PÆD",
+    "CO-TEACHER",
+    "BOOS",
+    "VIKAR",
+    "HJÆLPELÆRER",
+    "PRAKTIKANT",
+    "EKSTRA",
+}
+
 
 def _parse_iso_date(s: str | None) -> date | None:
     if not s:
@@ -111,6 +123,87 @@ def _format_header(date_iso: str) -> str:
     return f"# {wd} d.{d.day} {DK_MONTH[d.month - 1]} {d.year}"
 
 
+def _normalize_schedule_label(row: dict[str, Any]) -> str:
+    """Vælg bedste label for en skema-række.
+
+    Prioritet lige nu:
+    1) subject_full
+    2) subject_short
+    3) title
+
+    Det giver typisk 'Matematik' fremfor 'MAT'.
+    """
+    subject_full = (row.get("subject_full") or "").strip()
+    subject_short = (row.get("subject_short") or "").strip()
+    title_str = (row.get("title") or "").strip()
+
+    label = subject_full or subject_short or title_str
+    return label.strip()
+
+
+def _is_secondary_subject(label: str) -> bool:
+    label_upper = (label or "").strip().upper()
+    if not label_upper:
+        return True
+    return label_upper in SECONDARY_SUBJECTS
+
+
+def _combine_schedule_rows(schedule_rows: list[dict[str, Any]]) -> list[str]:
+    """Saml flere fag på samme tidspunkt til én linje.
+
+    Eksempel:
+    - 10:05 - 10:50 — Dansk
+    - 10:05 - 10:50 — CO-TEACHER
+    bliver til:
+    - 10:05 - 10:50 — Dansk / CO-TEACHER
+    """
+    grouped: dict[str, list[str]] = {}
+    order: list[str] = []
+
+    for row in schedule_rows:
+        time_str = (row.get("time") or "").strip()
+        label = _normalize_schedule_label(row)
+
+        if not time_str and not label:
+            continue
+
+        if time_str not in grouped:
+            grouped[time_str] = []
+            order.append(time_str)
+
+        if not label:
+            continue
+
+        existing_lower = {x.lower(): x for x in grouped[time_str]}
+        if label.lower() not in existing_lower:
+            grouped[time_str].append(label)
+
+    lines: list[str] = []
+
+    for time_str in order:
+        labels = grouped.get(time_str, [])
+
+        if labels:
+            labels_sorted = sorted(
+                labels,
+                key=lambda x: (
+                    1 if _is_secondary_subject(x) else 0,
+                    x.lower(),
+                ),
+            )
+            joined = " / ".join(labels_sorted)
+
+            if time_str:
+                lines.append(f"- {time_str} — {joined}")
+            else:
+                lines.append(f"- {joined}")
+        else:
+            if time_str:
+                lines.append(f"- {time_str}")
+
+    return lines
+
+
 def _build_homework_markdown(items: list[dict[str, Any]]) -> str:
     by_date: dict[str, dict[str, dict[str, list[str]]]] = {}
 
@@ -170,7 +263,7 @@ def _build_homework_markdown(items: list[dict[str, Any]]) -> str:
 
         parts.append("\n\n".join(day_parts))
 
-    return f"\n\n{SECTION_DIVIDER}\n\n".join(parts).strip() if parts else "Ingen lektier fundet."
+    return "\n\n<hr>\n\n".join(parts).strip() if parts else "Ingen lektier fundet."
 
 
 def _build_weekplan_markdown(
@@ -240,20 +333,7 @@ def _build_weekplan_markdown(
                 day_parts.append(SECTION_DIVIDER)
 
         if include_schedule:
-            schedule_lines: list[str] = []
-            for row in day.get("schedule", []):
-                time_str = (row.get("time") or "").strip()
-                subject_full = (row.get("subject_full") or "").strip()
-                subject_short = (row.get("subject_short") or "").strip()
-                title_str = (row.get("title") or "").strip()
-
-                label = subject_full or subject_short or title_str
-                if time_str and label:
-                    schedule_lines.append(f"- {time_str} — {label}")
-                elif time_str:
-                    schedule_lines.append(f"- {time_str}")
-                elif label:
-                    schedule_lines.append(f"- {label}")
+            schedule_lines = _combine_schedule_rows(day.get("schedule", []))
 
             if schedule_lines:
                 if lesson_plans:
