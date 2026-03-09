@@ -33,7 +33,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         """Fjern entities fra entity registry (opt-in)."""
         reg = er.async_get(hass)
 
-        # 1) "Alle lektier" sensor
         show_homework = bool(
             updated_entry.options.get(
                 OPT_SHOW_HOMEWORK_SENSORS,
@@ -46,14 +45,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             if entity_id:
                 reg.async_remove(entity_id)
 
-        # 2) Børnesensorer
         selected_names = set(updated_entry.options.get(OPT_SELECTED_CHILDREN, []))
         selected_slugs = {slugify(n) for n in selected_names}
 
-        # Vi fjerner child sensors som ikke længere er selected.
-        # Matcher både homework_ og weekplan_ unique_id'er.
         homework_prefix = f"{entry.entry_id}_homework_"
         weekplan_prefix = f"{entry.entry_id}_weekplan_"
+        weekplan_general_prefix = f"{entry.entry_id}_weekplan_general_"
+        weekplan_schedule_prefix = f"{entry.entry_id}_weekplan_schedule_"
         all_homework_unique = f"{entry.entry_id}_homework_all"
 
         for entity in list(reg.entities.values()):
@@ -69,14 +67,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
             child_slug: str | None = None
 
-            if entity.unique_id.startswith(homework_prefix):
+            if entity.unique_id.startswith(weekplan_general_prefix):
+                child_slug = entity.unique_id.replace(weekplan_general_prefix, "", 1)
+            elif entity.unique_id.startswith(weekplan_schedule_prefix):
+                child_slug = entity.unique_id.replace(weekplan_schedule_prefix, "", 1)
+            elif entity.unique_id.startswith(homework_prefix):
                 child_slug = entity.unique_id.replace(homework_prefix, "", 1)
             elif entity.unique_id.startswith(weekplan_prefix):
                 child_slug = entity.unique_id.replace(weekplan_prefix, "", 1)
             else:
                 continue
 
-            # Hvis der ikke er valgt nogen børn, så fjerner vi ikke automatisk
             if not selected_slugs:
                 continue
 
@@ -117,7 +118,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if coordinator and hasattr(coordinator, "async_shutdown"):
             try:
                 await coordinator.async_shutdown()
-            except Exception:  # noqa: BLE001
+            except Exception:
                 pass
 
         hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
