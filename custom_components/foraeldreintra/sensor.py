@@ -52,6 +52,20 @@ DK_MONTH = [
     "november",
     "december",
 ]
+DK_MONTH_SHORT_TO_LONG = {
+    "jan": "januar",
+    "feb": "februar",
+    "mar": "marts",
+    "apr": "april",
+    "maj": "maj",
+    "jun": "juni",
+    "jul": "juli",
+    "aug": "august",
+    "sep": "september",
+    "okt": "oktober",
+    "nov": "november",
+    "dec": "december",
+}
 
 SECTION_DIVIDER = "<hr>"
 
@@ -163,11 +177,9 @@ def _apply_subject_alias(label: str, alias_map: dict[str, str]) -> str:
 
 
 def _raw_schedule_key(row: dict[str, Any]) -> str:
-    """Returner rå nøgle til sortering/prioritering før alias anvendes."""
     subject_short = (row.get("subject_short") or "").strip()
     subject_full = (row.get("subject_full") or "").strip()
     title_str = (row.get("title") or "").strip()
-
     return (subject_short or subject_full or title_str).strip()
 
 
@@ -207,7 +219,6 @@ def _combine_schedule_rows(
             grouped[time_str] = []
             order.append(time_str)
 
-        # alias som MAS= skal kunne skjule faget helt
         if not label:
             continue
 
@@ -241,6 +252,97 @@ def _combine_schedule_rows(
                 lines.append(f"- {time_str}")
 
     return lines
+
+
+def _week_short(week_value: str | None) -> str:
+    text = (week_value or "").strip()
+    if not text:
+        return ""
+    match = re.match(r"^(\d{1,2})-\d{4}$", text)
+    if match:
+        return str(int(match.group(1)))
+    return text
+
+
+def _build_display_title(plan: dict[str, Any]) -> str:
+    class_or_group = (plan.get("class_or_group") or "").strip()
+    week = _week_short(plan.get("week"))
+
+    if class_or_group and week:
+        return f"Ugeplan for {class_or_group} - uge {week}"
+    if week:
+        return f"Ugeplan - uge {week}"
+    return (plan.get("title") or "").strip()
+
+
+def _expand_formatted_date(date_text: str) -> str:
+    text = (date_text or "").strip()
+    if not text:
+        return ""
+
+    match = re.match(r"^(\d{1,2})\.\s*([A-Za-zæøåÆØÅ]+)\.?$", text)
+    if not match:
+        return text
+
+    day = match.group(1)
+    month_raw = match.group(2).lower()
+    month_long = DK_MONTH_SHORT_TO_LONG.get(month_raw, month_raw)
+    return f"{day}. {month_long}"
+
+
+def _format_day_header(day: dict[str, Any]) -> str:
+    header = (day.get("day") or "").strip()
+    formatted_date = _expand_formatted_date(day.get("formatted_date"))
+    if formatted_date:
+        header = f"{header} {formatted_date}".strip()
+    return header
+
+
+def _looks_like_date_heading(text: str) -> bool:
+    s = (text or "").strip()
+    if not s.endswith(":"):
+        return False
+
+    if re.match(r"^(Mandag|Tirsdag|Onsdag|Torsdag|Fredag|Lørdag|Søndag)\b", s):
+        return True
+
+    if re.match(
+        r"^(Mandag|Tirsdag|Onsdag|Torsdag|Fredag|Lørdag|Søndag),\s*"
+        r"(mandag|tirsdag|onsdag|torsdag|fredag|lørdag|søndag)\s+og\s+"
+        r"(mandag|tirsdag|onsdag|torsdag|fredag|lørdag|søndag):$",
+        s.lower(),
+    ):
+        return True
+
+    return False
+
+
+def _format_general_content(text: str) -> str:
+    lines = [(line or "").strip() for line in (text or "").splitlines()]
+    lines = [line for line in lines if line]
+    if not lines:
+        return ""
+
+    formatted: list[str] = []
+    i = 0
+
+    while i < len(lines):
+        line = lines[i]
+
+        if _looks_like_date_heading(line) and i + 1 < len(lines):
+            formatted.append(f"**{line}** {lines[i + 1]}")
+            i += 2
+            continue
+
+        if line.endswith(":") and len(line) > 20:
+            formatted.append(f"**{line}**")
+            i += 1
+            continue
+
+        formatted.append(line)
+        i += 1
+
+    return "\n\n".join(formatted).strip()
 
 
 def _build_homework_markdown(items: list[dict[str, Any]]) -> str:
@@ -311,7 +413,7 @@ def _build_weekplan_markdown(
     include_schedule: bool,
     alias_map: dict[str, str],
 ) -> str:
-    title = (plan.get("title") or "").strip()
+    title = _build_display_title(plan)
     items = plan.get("items") or []
     days = plan.get("days") or []
 
@@ -342,8 +444,9 @@ def _build_weekplan_markdown(
             if subject and subject.lower() not in {"generelt", "(uden angivelse af fag)"}:
                 markdown_parts.append(f"### {subject}")
 
-            if item.get("content_text"):
-                markdown_parts.append(item["content_text"])
+            content_text = (item.get("content_text") or "").strip()
+            if content_text:
+                markdown_parts.append(_format_general_content(content_text))
 
             if idx < len(general_items) - 1:
                 markdown_parts.append(SECTION_DIVIDER)
@@ -354,11 +457,7 @@ def _build_weekplan_markdown(
     for idx, day in enumerate(visible_days):
         day_parts: list[str] = []
 
-        header = (day.get("day") or "").strip()
-        formatted_date = (day.get("formatted_date") or "").strip()
-        if formatted_date:
-            header = f"{header} {formatted_date}".strip()
-
+        header = _format_day_header(day)
         if header:
             day_parts.append(f"## {header}")
 
@@ -555,7 +654,7 @@ class ForaeldreIntraChildWeekplanSensor(ForaeldreIntraBaseSensor):
     def native_value(self) -> str:
         weeklyplans = (self.coordinator.data or {}).get("weeklyplans", {})
         plan = weeklyplans.get(self._child, {})
-        return plan.get("week") or "ingen"
+        return _week_short(plan.get("week")) or "ingen"
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -581,14 +680,6 @@ class ForaeldreIntraChildWeekplanSensor(ForaeldreIntraBaseSensor):
             )
         )
 
-        attrs: dict[str, Any] = {
-            "barn": self._child,
-            "title": plan.get("title"),
-            "week": plan.get("week"),
-            "url": plan.get("url"),
-            "class_or_group": plan.get("class_or_group"),
-        }
-
         items = plan.get("items", [])
         days = plan.get("days", [])
 
@@ -604,13 +695,22 @@ class ForaeldreIntraChildWeekplanSensor(ForaeldreIntraBaseSensor):
                 for day in days
             ]
 
-        attrs["items"] = items
-        attrs["days"] = days
+        attrs: dict[str, Any] = {
+            "barn": self._child,
+            "title": _build_display_title(plan),
+            "week": _week_short(plan.get("week")),
+            "url": plan.get("url"),
+            "class_or_group": plan.get("class_or_group"),
+            "items": items,
+            "days": days,
+        }
 
         if add_markdown:
             attrs["markdown"] = _build_weekplan_markdown(
                 {
                     "title": plan.get("title"),
+                    "week": plan.get("week"),
+                    "class_or_group": plan.get("class_or_group"),
                     "items": items,
                     "days": days,
                 },
@@ -635,17 +735,18 @@ class ForaeldreIntraChildWeekplanGeneralSensor(ForaeldreIntraBaseSensor):
     def native_value(self) -> str:
         weeklyplans = (self.coordinator.data or {}).get("weeklyplans", {})
         plan = weeklyplans.get(self._child, {})
-        return plan.get("week") or "ingen"
+        return _week_short(plan.get("week")) or "ingen"
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         weeklyplans = (self.coordinator.data or {}).get("weeklyplans", {})
-        plan = _plan_general_only(dict(weeklyplans.get(self._child, {}) or {}))
+        raw_plan = dict(weeklyplans.get(self._child, {}) or {})
+        plan = _plan_general_only(raw_plan)
 
         attrs: dict[str, Any] = {
             "barn": self._child,
-            "title": plan.get("title"),
-            "week": plan.get("week"),
+            "title": _build_display_title(raw_plan),
+            "week": _week_short(raw_plan.get("week")),
             "url": plan.get("url"),
             "class_or_group": plan.get("class_or_group"),
             "items": plan.get("items", []),
@@ -654,7 +755,13 @@ class ForaeldreIntraChildWeekplanGeneralSensor(ForaeldreIntraBaseSensor):
 
         if bool(self._entry.options.get(OPT_ADD_WEEKPLAN_MARKDOWN, DEFAULT_ADD_WEEKPLAN_MARKDOWN)):
             attrs["markdown"] = _build_weekplan_markdown(
-                plan,
+                {
+                    "title": raw_plan.get("title"),
+                    "week": raw_plan.get("week"),
+                    "class_or_group": raw_plan.get("class_or_group"),
+                    "items": plan.get("items", []),
+                    "days": [],
+                },
                 include_general=True,
                 include_schedule=False,
                 alias_map=self._subject_alias_map(),
@@ -676,17 +783,18 @@ class ForaeldreIntraChildWeekplanScheduleSensor(ForaeldreIntraBaseSensor):
     def native_value(self) -> str:
         weeklyplans = (self.coordinator.data or {}).get("weeklyplans", {})
         plan = weeklyplans.get(self._child, {})
-        return plan.get("week") or "ingen"
+        return _week_short(plan.get("week")) or "ingen"
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         weeklyplans = (self.coordinator.data or {}).get("weeklyplans", {})
-        plan = _plan_schedule_only(dict(weeklyplans.get(self._child, {}) or {}))
+        raw_plan = dict(weeklyplans.get(self._child, {}) or {})
+        plan = _plan_schedule_only(raw_plan)
 
         attrs: dict[str, Any] = {
             "barn": self._child,
-            "title": plan.get("title"),
-            "week": plan.get("week"),
+            "title": _build_display_title(raw_plan),
+            "week": _week_short(raw_plan.get("week")),
             "url": plan.get("url"),
             "class_or_group": plan.get("class_or_group"),
             "items": [],
@@ -695,7 +803,13 @@ class ForaeldreIntraChildWeekplanScheduleSensor(ForaeldreIntraBaseSensor):
 
         if bool(self._entry.options.get(OPT_ADD_WEEKPLAN_MARKDOWN, DEFAULT_ADD_WEEKPLAN_MARKDOWN)):
             attrs["markdown"] = _build_weekplan_markdown(
-                plan,
+                {
+                    "title": raw_plan.get("title"),
+                    "week": raw_plan.get("week"),
+                    "class_or_group": raw_plan.get("class_or_group"),
+                    "items": [],
+                    "days": plan.get("days", []),
+                },
                 include_general=False,
                 include_schedule=True,
                 alias_map=self._subject_alias_map(),
