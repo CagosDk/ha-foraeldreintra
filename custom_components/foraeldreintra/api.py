@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import html
+import json
 import re
 from dataclasses import dataclass
 from typing import Any
 
 from aiohttp import ClientSession
-from bs4 import BeautifulSoup, Tag
+from bs4 import BeautifulSoup
 
 
 class ForaldreIntraAuthError(Exception):
@@ -122,8 +124,8 @@ class ForaldreIntraClient:
 
     async def get_children(self) -> list[Child]:
         """Find børn ud fra URL og menu."""
-        html, url = await self._get_home_html_and_url()
-        soup = BeautifulSoup(html, "html.parser")
+        html_text, url = await self._get_home_html_and_url()
+        soup = BeautifulSoup(html_text, "html.parser")
 
         children: list[Child] = []
         seen: set[tuple[str, str]] = set()
@@ -206,7 +208,7 @@ class ForaldreIntraClient:
         self,
         children: list[Child],
     ) -> dict[str, dict[str, Any]]:
-        """Henter fuld ugeplan for hver valgt elev, baseret på nyeste publicerede ugeplan."""
+        """Henter fuld ugeplan for hver valgt elev."""
         result: dict[str, dict[str, Any]] = {}
 
         for child in children:
@@ -220,7 +222,7 @@ class ForaldreIntraClient:
         self,
         children: list[Child],
     ) -> list[dict[str, Any]]:
-        """Beholdes for bagudkompatibilitet."""
+        """Bagudkompatibel hjælpefunktion."""
         result: list[dict[str, Any]] = []
         plans = await self.get_weekplans_for_children(children)
 
@@ -242,9 +244,9 @@ class ForaldreIntraClient:
         if not latest:
             return None
 
-        html = await self._get_text(latest["url"])
+        html_text = await self._get_text(latest["url"])
         parsed = self._parse_weekplan_page(
-            html=html,
+            html_text=html_text,
             weekplan_id=latest["weekplan_id"],
             fallback_title=latest["title"],
             url=latest["url"],
@@ -310,20 +312,20 @@ class ForaldreIntraClient:
 
             return text
 
-    def _extract_diary_id(self, html: str) -> str | None:
-        m = re.search(r"weeklyplansandhomework/diary/(\d+)", html)
+    def _extract_diary_id(self, html_text: str) -> str | None:
+        m = re.search(r"weeklyplansandhomework/diary/(\d+)", html_text)
         if m:
             return m.group(1)
 
-        m = re.search(r"diary/(\d+)(?:/|\"|'|\?)", html)
+        m = re.search(r"diary/(\d+)(?:/|\"|'|\?)", html_text)
         if m:
             return m.group(1)
 
         return None
 
-    def _extract_latest_weekplan_from_list(self, html: str) -> dict[str, str] | None:
+    def _extract_latest_weekplan_from_list(self, html_text: str) -> dict[str, str] | None:
         """Finder første publicerede ugeplan på /weeklyplansandhomework/list."""
-        soup = BeautifulSoup(html, "html.parser")
+        soup = BeautifulSoup(html_text, "html.parser")
 
         container = soup.select_one("ul.sk-weekly-plans-list-container")
         if not container:
@@ -350,46 +352,128 @@ class ForaldreIntraClient:
 
     def _parse_weekplan_page(
         self,
-        html: str,
+        html_text: str,
         weekplan_id: str,
         fallback_title: str,
         url: str,
     ) -> dict[str, Any]:
-        """Parser ugeplansside til det format sensor.py forventer."""
-        soup = BeautifulSoup(html, "html.parser")
+        """Parser ugeplansside fra WeeklyPlansApp JSON til sensor-format."""
+        soup = BeautifulSoup(html_text, "html.parser")
+        root = soup.select_one("#root")
 
-        content_root = (
-            soup.select_one("div.sk-l-content")
-            or soup.select_one("div.sk-l-content-wrapper")
-            or soup.body
-            or soup
-        )
+        app_data_raw = ""
+        if root:
+            app_data_raw = root.get("data-clientlogic-settings-weeklyplansapp", "") or root.get(
+                "data-clientlogic-settings-WeeklyPlansApp", ""
+            )
 
-        for tag in content_root.select("script, style, noscript"):
-            tag.decompose()
+        if not app_data_raw:
+            return {
+                "title": fallback_title,
+                "week": weekplan_id,
+                "url": url,
+                "class_or_group": None,
+                "items": [],
+                "days": [],
+            }
 
-        title = self._extract_weekplan_title(content_root) or fallback_title
-        class_or_group = self._extract_class_or_group(content_root)
-        days = self._extract_weekplan_days(content_root)
+        try:
+            app_data = json.loads(html.unescape(app_data_raw))
+        except Exception:
+            return {
+                "title": fallback_title,
+                "week": weekplan_id,
+                "url": url,
+                "class_or_group": None,
+                "items": [],
+                "days": [],
+            }
+
+        selected_plan = app_data.get("SelectedPlan") or {}
+        general_plan = selected_plan.get("GeneralPlan") or {}
+        daily_plans = selected_plan.get("DailyPlans") or []
+
+        formatted_week = (selected_plan.get("FormattedWeek") or weekplan_id or "").strip()
+        class_or_group = (selected_plan.get("ClassOrGroup") or "").strip() or None
+
+        title = fallback_title
+        if class_or_group and formatted_week:
+            title = f"Ugeplan for {class_or_group} - uge {formatted_week}"
+        elif formatted_week:
+            title = f"Ugeplan - uge {formatted_week}"
+
         items: list[dict[str, Any]] = []
+        days: list[dict[str, Any]] = []
 
-        general_text = self._extract_general_weekplan_text(content_root)
-        if general_text:
-            items.append(
+        for lesson_plan in general_plan.get("LessonPlans") or []:
+            subject_obj = lesson_plan.get("Subject") or {}
+            subject = (
+                subject_obj.get("FormattedTitle")
+                or subject_obj.get("Title")
+                or "Generelt"
+            )
+            content_html = lesson_plan.get("Content") or ""
+            content_text = self._html_to_text(content_html)
+
+            if content_text:
+                items.append(
+                    {
+                        "type": "general",
+                        "subject": subject,
+                        "content_text": content_text,
+                    }
+                )
+
+        for daily_plan in daily_plans:
+            day_name = (daily_plan.get("Day") or "").strip()
+            formatted_date = (daily_plan.get("FormattedDate") or "").strip()
+
+            lesson_plans_out: list[dict[str, Any]] = []
+            schedule_out: list[dict[str, str]] = []
+
+            for lesson_plan in daily_plan.get("LessonPlans") or []:
+                subject_obj = lesson_plan.get("Subject") or {}
+                subject = (
+                    subject_obj.get("FormattedTitle")
+                    or subject_obj.get("Title")
+                    or "Generelt"
+                )
+                content_html = lesson_plan.get("Content") or ""
+                content_text = self._html_to_text(content_html)
+
+                if content_text:
+                    lesson_plans_out.append(
+                        {
+                            "subject": subject,
+                            "content_text": content_text,
+                        }
+                    )
+
+            for row in daily_plan.get("Schedule") or []:
+                schedule_out.append(
+                    {
+                        "time": (row.get("TimeString") or "").strip(),
+                        "subject_short": (row.get("ShortSubjectTitle") or "").strip(),
+                        "subject_full": (row.get("FullSubjectTitle") or "").strip(),
+                        "title": (row.get("Title") or "").strip(),
+                    }
+                )
+
+            days.append(
                 {
-                    "type": "general",
-                    "subject": "Generelt",
-                    "content_text": general_text,
+                    "day": day_name,
+                    "formatted_date": formatted_date,
+                    "lesson_plans": lesson_plans_out,
+                    "schedule": schedule_out,
                 }
             )
 
-        for day in days:
-            for lesson in day.get("lesson_plans", []):
+            for lesson in lesson_plans_out:
                 items.append(
                     {
                         "type": "day",
-                        "day": day.get("day"),
-                        "formatted_date": day.get("formatted_date"),
+                        "day": day_name,
+                        "formatted_date": formatted_date,
                         "subject": lesson.get("subject"),
                         "content_text": lesson.get("content_text"),
                     }
@@ -397,207 +481,26 @@ class ForaldreIntraClient:
 
         return {
             "title": title,
-            "week": weekplan_id,
+            "week": formatted_week or weekplan_id,
             "url": url,
             "class_or_group": class_or_group,
             "items": items,
             "days": days,
         }
 
-    def _extract_weekplan_title(self, root: Tag) -> str | None:
-        for selector in ("h1", "h2", ".sk-page-header", ".sk-page-title"):
-            el = root.select_one(selector)
-            if el:
-                text = self._clean_text(el.get_text(" ", strip=True))
-                if text:
-                    return text
-        return None
+    def _html_to_text(self, html_fragment: str) -> str:
+        if not html_fragment:
+            return ""
 
-    def _extract_class_or_group(self, root: Tag) -> str | None:
-        txt = self._clean_text(root.get_text(" ", strip=True))
-        m = re.search(r"\b(\d{1,2}[A-ZÆØÅa-zæøå])\b", txt)
-        if m:
-            return m.group(1)
-        return None
+        soup = BeautifulSoup(html_fragment, "html.parser")
 
-    def _extract_general_weekplan_text(self, root: Tag) -> str:
-        """Forsøger at finde den generelle tekst i ugeplanen."""
-        candidates: list[str] = []
+        for br in soup.find_all("br"):
+            br.replace_with("\n")
 
-        selectors = [
-            ".sk-user-input",
-            ".sk-white-box",
-            ".sk-week-plan-content",
-            ".sk-weekly-plan-content",
-        ]
-
-        for selector in selectors:
-            for el in root.select(selector):
-                text = self._clean_multiline_text(el.get_text("\n", strip=True))
-                if text and len(text) > 30:
-                    candidates.append(text)
-
-        if candidates:
-            best = max(candidates, key=len)
-            return best
-
-        return ""
-
-    def _extract_weekplan_days(self, root: Tag) -> list[dict[str, Any]]:
-        days: list[dict[str, Any]] = []
-
-        day_headers = []
-        weekday_re = re.compile(
-            r"^(Mandag|Tirsdag|Onsdag|Torsdag|Fredag|Lørdag|Søndag)\b",
-            re.IGNORECASE,
-        )
-
-        for el in root.find_all(["h2", "h3", "h4", "strong", "b"]):
-            text = self._clean_text(el.get_text(" ", strip=True))
-            if weekday_re.match(text):
-                day_headers.append(el)
-
-        seen_headers: set[str] = set()
-
-        for header in day_headers:
-            header_text = self._clean_text(header.get_text(" ", strip=True))
-            if not header_text or header_text in seen_headers:
-                continue
-            seen_headers.add(header_text)
-
-            day_name, formatted_date = self._split_day_header(header_text)
-            section_nodes = self._collect_until_next_day_header(header, weekday_re)
-
-            lesson_plans: list[dict[str, Any]] = []
-            schedule: list[dict[str, Any]] = []
-
-            section_texts: list[str] = []
-            for node in section_nodes:
-                if getattr(node, "name", None) == "table":
-                    schedule.extend(self._parse_schedule_table(node))
-                else:
-                    txt = self._clean_multiline_text(node.get_text("\n", strip=True))
-                    if txt:
-                        section_texts.append(txt)
-
-            merged_text = "\n\n".join(t for t in section_texts if t).strip()
-            if merged_text:
-                lesson_plans.append(
-                    {
-                        "subject": "Generelt",
-                        "content_text": merged_text,
-                    }
-                )
-
-            if lesson_plans or schedule:
-                days.append(
-                    {
-                        "day": day_name,
-                        "formatted_date": formatted_date,
-                        "lesson_plans": lesson_plans,
-                        "schedule": schedule,
-                    }
-                )
-
-        if days:
-            return days
-
-        schedule_tables = root.find_all("table")
-        flat_schedule: list[dict[str, Any]] = []
-        for table in schedule_tables:
-            flat_schedule.extend(self._parse_schedule_table(table))
-
-        if flat_schedule:
-            days.append(
-                {
-                    "day": "",
-                    "formatted_date": "",
-                    "lesson_plans": [],
-                    "schedule": flat_schedule,
-                }
-            )
-
-        return days
-
-    def _collect_until_next_day_header(self, header: Tag, weekday_re: re.Pattern[str]) -> list[Tag]:
-        nodes: list[Tag] = []
-        node = header.parent if header.parent and header.parent != header else header
-
-        current = node.find_next_sibling()
-        while current:
-            text = self._clean_text(current.get_text(" ", strip=True))
-            if current.name in ("h2", "h3", "h4", "strong", "b") and weekday_re.match(text):
-                break
-
-            inner_header = current.find(["h2", "h3", "h4", "strong", "b"])
-            if inner_header:
-                inner_text = self._clean_text(inner_header.get_text(" ", strip=True))
-                if weekday_re.match(inner_text):
-                    break
-
-            if isinstance(current, Tag):
-                nodes.append(current)
-
-            current = current.find_next_sibling()
-
-        return nodes
-
-    def _parse_schedule_table(self, table: Tag) -> list[dict[str, str]]:
-        rows: list[dict[str, str]] = []
-
-        for tr in table.find_all("tr"):
-            cells = tr.find_all(["td", "th"])
-            values = [self._clean_text(c.get_text(" ", strip=True)) for c in cells]
-            values = [v for v in values if v]
-
-            if len(values) < 2:
-                continue
-
-            time_str = ""
-            subject_short = ""
-            subject_full = ""
-            title = ""
-
-            if re.match(r"^\d{1,2}[:.]\d{2}", values[0]):
-                time_str = values[0]
-                if len(values) >= 2:
-                    subject_short = values[1]
-                if len(values) >= 3:
-                    subject_full = values[2]
-                if len(values) >= 4:
-                    title = values[3]
-            else:
-                subject_short = values[0]
-                if len(values) >= 2:
-                    subject_full = values[1]
-                if len(values) >= 3:
-                    title = values[2]
-
-            if time_str or subject_short or subject_full or title:
-                rows.append(
-                    {
-                        "time": time_str,
-                        "subject_short": subject_short,
-                        "subject_full": subject_full,
-                        "title": title,
-                    }
-                )
-
-        return rows
-
-    def _split_day_header(self, text: str) -> tuple[str, str]:
-        text = self._clean_text(text)
-        m = re.match(
-            r"^(Mandag|Tirsdag|Onsdag|Torsdag|Fredag|Lørdag|Søndag)\s*(.*)$",
-            text,
-            re.IGNORECASE,
-        )
-        if not m:
-            return text, ""
-
-        day = m.group(1).capitalize()
-        rest = (m.group(2) or "").strip(" -–—")
-        return day, rest
+        text = soup.get_text("\n", strip=True)
+        lines = [(line or "").replace("\xa0", " ").strip() for line in text.splitlines()]
+        lines = [line for line in lines if line]
+        return "\n".join(lines).strip()
 
     def _clean_child_name(self, name: str) -> str:
         """Fjern evt. 'item' suffix fra barnets navn i URL."""
@@ -606,16 +509,8 @@ class ForaldreIntraClient:
             n = n[:-4]
         return n
 
-    def _clean_text(self, txt: str) -> str:
-        return (txt or "").replace("\xa0", " ").strip()
-
-    def _clean_multiline_text(self, txt: str) -> str:
-        lines = [self._clean_text(line) for line in (txt or "").splitlines()]
-        lines = [line for line in lines if line]
-        return "\n".join(lines).strip()
-
-    def _parse_homework_notes(self, html: str) -> list[dict[str, Any]]:
-        soup = BeautifulSoup(html, "html.parser")
+    def _parse_homework_notes(self, html_text: str) -> list[dict[str, Any]]:
+        soup = BeautifulSoup(html_text, "html.parser")
         result: list[dict[str, Any]] = []
 
         def clean_text(txt: str) -> str:
