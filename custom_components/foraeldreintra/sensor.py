@@ -47,6 +47,8 @@ DK_MONTH = [
     "december",
 ]
 
+SECTION_DIVIDER = "<hr>"
+
 
 def _parse_iso_date(s: str | None) -> date | None:
     if not s:
@@ -168,7 +170,7 @@ def _build_homework_markdown(items: list[dict[str, Any]]) -> str:
 
         parts.append("\n\n".join(day_parts))
 
-    return "\n\n---\n\n".join(parts).strip() if parts else "Ingen lektier fundet."
+    return f"\n\n{SECTION_DIVIDER}\n\n".join(parts).strip() if parts else "Ingen lektier fundet."
 
 
 def _build_weekplan_markdown(
@@ -199,7 +201,7 @@ def _build_weekplan_markdown(
 
     if has_general_section:
         if title:
-            markdown_parts.append("---")
+            markdown_parts.append(SECTION_DIVIDER)
         markdown_parts.append("## Generelt")
 
         for idx, item in enumerate(general_items):
@@ -211,10 +213,10 @@ def _build_weekplan_markdown(
                 markdown_parts.append(item["content_text"])
 
             if idx < len(general_items) - 1:
-                markdown_parts.append("---")
+                markdown_parts.append(SECTION_DIVIDER)
 
     if has_general_section and has_day_section:
-        markdown_parts.append("---")
+        markdown_parts.append(SECTION_DIVIDER)
 
     for idx, day in enumerate(visible_days):
         day_parts: list[str] = []
@@ -235,7 +237,7 @@ def _build_weekplan_markdown(
                 day_parts.append(lesson["content_text"])
 
             if lesson_idx < len(lesson_plans) - 1:
-                day_parts.append("---")
+                day_parts.append(SECTION_DIVIDER)
 
         if include_schedule:
             schedule_lines: list[str] = []
@@ -255,14 +257,14 @@ def _build_weekplan_markdown(
 
             if schedule_lines:
                 if lesson_plans:
-                    day_parts.append("---")
+                    day_parts.append(SECTION_DIVIDER)
                 day_parts.append("### Skema")
                 day_parts.append("\n".join(schedule_lines))
 
         markdown_parts.append("\n\n".join(day_parts))
 
         if idx < len(visible_days) - 1:
-            markdown_parts.append("---")
+            markdown_parts.append(SECTION_DIVIDER)
 
     return "\n\n".join(part for part in markdown_parts if part).strip() or "Ingen ugeplan fundet."
 
