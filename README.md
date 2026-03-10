@@ -87,16 +87,6 @@ Available options include:
 - **Auto-remove unselected children**  
   Control behavior when children are deselected
 
-- **Refresh mode**
-  - **Interval**
-  - **Fixed times**
-
-- **Refresh interval**  
-  Number of minutes between updates when interval mode is used
-
-- **Fixed times**  
-  Comma-separated times such as:
-  `06:30,12:00,17:00`
 
 ## Entities
 
@@ -138,12 +128,12 @@ Typical entities include:
 
 type: markdown
 content: >
-  {{ state_attr('sensor.foraeldreintra_lektier_frederik', 'markdown') }}
+  {{ state_attr('sensor.foraeldreintra_lektier_CHILDNAME', 'markdown') }}
 
 ### Show weekly plan in a Markdown card
 type: markdown
 content: >
-  {{ state_attr('sensor.foraeldreintra_ugeplan_frederik', 'markdown') }}
+  {{ state_attr('sensor.foraeldreintra_ugeplan_CHILDNAME', 'markdown') }}
 
 ## Notes and limitations
 
