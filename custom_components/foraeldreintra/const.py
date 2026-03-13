@@ -52,3 +52,10 @@ DEFAULT_SUBJECT_ALIASES = ""
 
 # Intern fast polling
 DEFAULT_SCAN_INTERVAL_MINUTES = 60
+
+# Afledte lektier fra ugeplan
+OPT_WEEKPLAN_DERIVED_HOMEWORK_ENABLED = "weekplan_derived_homework_enabled"
+DEFAULT_WEEKPLAN_DERIVED_HOMEWORK_ENABLED = False
+
+OPT_WEEKPLAN_DERIVED_HOMEWORK_KEYWORDS = "weekplan_derived_homework_keywords"
+DEFAULT_WEEKPLAN_DERIVED_HOMEWORK_KEYWORDS = ["diktatord", "øveord", "ord til diktat"]

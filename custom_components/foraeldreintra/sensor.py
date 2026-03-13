@@ -24,6 +24,8 @@ from .const import (
     DEFAULT_SHOW_WEEKPLAN_SCHEDULE_SENSORS,
     DEFAULT_SHOW_WEEKPLAN_SENSORS,
     DEFAULT_SUBJECT_ALIASES,
+    DEFAULT_WEEKPLAN_DERIVED_HOMEWORK_ENABLED,
+    DEFAULT_WEEKPLAN_DERIVED_HOMEWORK_KEYWORDS,
     DOMAIN,
     OPT_ADD_HOMEWORK_MARKDOWN,
     OPT_ADD_WEEKPLAN_MARKDOWN,
@@ -38,6 +40,8 @@ from .const import (
     OPT_SHOW_WEEKPLAN_SCHEDULE_SENSORS,
     OPT_SHOW_WEEKPLAN_SENSORS,
     OPT_SUBJECT_ALIASES,
+    OPT_WEEKPLAN_DERIVED_HOMEWORK_ENABLED,
+    OPT_WEEKPLAN_DERIVED_HOMEWORK_KEYWORDS,
 )
 from .coordinator import ForaldreIntraCoordinator
 
@@ -146,6 +150,213 @@ def _filter_items(
 
     out.sort(key=lambda x: ((x.get("dato") or ""), (x.get("barn") or ""), (x.get("fag") or "")))
     return out
+
+
+def _parse_keyword_lines(raw: str | None) -> list[str]:
+    if raw is None:
+        return []
+
+    text = str(raw).replace(";", "\n").replace(",", "\n")
+    keywords: list[str] = []
+
+    for line in text.splitlines():
+        value = line.strip().lower()
+        if value:
+            keywords.append(value)
+
+    return keywords
+
+
+def _weekplan_keywords(entry: ConfigEntry) -> list[str]:
+    defaults = [k.lower() for k in DEFAULT_WEEKPLAN_DERIVED_HOMEWORK_KEYWORDS]
+    extra = _parse_keyword_lines(
+        entry.options.get(
+            OPT_WEEKPLAN_DERIVED_HOMEWORK_KEYWORDS,
+            ", ".join(DEFAULT_WEEKPLAN_DERIVED_HOMEWORK_KEYWORDS),
+        )
+    )
+
+    merged: list[str] = []
+    seen: set[str] = set()
+    for item in [*defaults, *extra]:
+        normalized = item.strip().lower()
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            merged.append(normalized)
+    return merged
+
+
+def _normalize_subject_value(value: str | None) -> str:
+    return re.sub(r"\s+", " ", (value or "").strip()).lower()
+
+
+def _extract_year_from_weekplan(plan: dict[str, Any]) -> int | None:
+    for candidate in [plan.get("url"), plan.get("week"), plan.get("title")]:
+        text = (candidate or "").strip()
+        match = re.search(r"(?:/|^)(\d{1,2})-(\d{4})(?:$|[^\d])", text)
+        if match:
+            return int(match.group(2))
+
+        match = re.search(r"\b(20\d{2})\b", text)
+        if match:
+            return int(match.group(1))
+
+    return None
+
+
+def _formatted_date_to_iso(formatted_date: str | None, default_year: int | None) -> str | None:
+    text = (formatted_date or "").strip()
+    if not text:
+        return None
+
+    match = re.match(r"^(\d{1,2})\.\s*([A-Za-zæøåÆØÅ]+)\.?$", text)
+    if not match:
+        return None
+
+    if default_year is None:
+        default_year = date.today().year
+
+    day = int(match.group(1))
+    month_key = match.group(2).lower()
+    month_name = DK_MONTH_SHORT_TO_LONG.get(month_key, month_key)
+
+    try:
+        month = DK_MONTH.index(month_name) + 1
+    except ValueError:
+        return None
+
+    try:
+        return date(default_year, month, day).isoformat()
+    except ValueError:
+        return None
+
+
+def _derive_homework_title_from_prefix(prefix: str) -> str:
+    cleaned = re.sub(r"\s+", " ", (prefix or "").strip(" :-"))
+    if not cleaned:
+        return "Øveopgave"
+
+    lowered = cleaned.lower()
+    if "diktat" in lowered:
+        return "Diktat"
+    if "læs" in lowered:
+        return "Læsning"
+
+    title = cleaned.rstrip(":")
+    return title[:1].upper() + title[1:]
+
+
+def _extract_practice_text_from_general_content(
+    content_text: str,
+    keywords: list[str],
+) -> tuple[str, str] | None:
+    for raw_line in (content_text or "").splitlines():
+        line = raw_line.strip()
+        if not line or ":" not in line:
+            continue
+
+        prefix, suffix = line.split(":", 1)
+        prefix_clean = prefix.strip()
+        suffix_clean = suffix.strip()
+        if not suffix_clean:
+            continue
+
+        prefix_lower = prefix_clean.lower()
+        if any(keyword in prefix_lower for keyword in keywords):
+            return (_derive_homework_title_from_prefix(prefix_clean), suffix_clean)
+
+    return None
+
+
+def _derive_homework_from_weekplans(
+    entry: ConfigEntry,
+    weeklyplans: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    enabled = bool(
+        entry.options.get(
+            OPT_WEEKPLAN_DERIVED_HOMEWORK_ENABLED,
+            DEFAULT_WEEKPLAN_DERIVED_HOMEWORK_ENABLED,
+        )
+    )
+    if not enabled:
+        return []
+
+    keywords = _weekplan_keywords(entry)
+    if not keywords:
+        return []
+
+    derived: list[dict[str, Any]] = []
+
+    for child_name, plan in (weeklyplans or {}).items():
+        items = plan.get("items", []) if isinstance(plan.get("items"), list) else []
+        days = plan.get("days", []) if isinstance(plan.get("days"), list) else []
+        year = _extract_year_from_weekplan(plan)
+
+        for general_item in items:
+            if general_item.get("type") != "general":
+                continue
+
+            subject = (general_item.get("subject") or "").strip()
+            subject_normalized = _normalize_subject_value(subject)
+            match = _extract_practice_text_from_general_content(
+                general_item.get("content_text") or "",
+                keywords,
+            )
+            if not match:
+                continue
+
+            task_title, practice_text = match
+            task_title_lower = task_title.lower()
+
+            for day in days:
+                lesson_plans = day.get("lesson_plans", []) if isinstance(day.get("lesson_plans"), list) else []
+                formatted_date = (day.get("formatted_date") or "").strip()
+                iso_date = _formatted_date_to_iso(formatted_date, year)
+
+                if not iso_date:
+                    continue
+
+                for lesson in lesson_plans:
+                    lesson_subject = _normalize_subject_value(lesson.get("subject"))
+                    lesson_text = (lesson.get("content_text") or "").strip()
+
+                    if not lesson_text:
+                        continue
+                    if subject_normalized and lesson_subject and lesson_subject != subject_normalized:
+                        continue
+                    if task_title_lower not in lesson_text.lower():
+                        continue
+
+                    derived.append(
+                        {
+                            "barn": child_name,
+                            "dato": iso_date,
+                            "fag": subject or "Ukendt fag",
+                            "tekst": f"{task_title}: Øv {practice_text}",
+                            "links": [],
+                            "source": "weekplan",
+                            "derived": True,
+                            "title": task_title,
+                            "keyword_match": practice_text,
+                            "weekplan_day": day.get("day"),
+                            "weekplan_date": formatted_date,
+                        }
+                    )
+                    break
+
+    derived.sort(
+        key=lambda x: ((x.get("dato") or ""), (x.get("barn") or ""), (x.get("fag") or ""))
+    )
+    return derived
+
+
+def _merge_homework_items(
+    entry: ConfigEntry,
+    data: dict[str, Any],
+) -> list[dict[str, Any]]:
+    base_items = list((data or {}).get("items", []) or [])
+    weeklyplans = (data or {}).get("weeklyplans", {}) or {}
+    return base_items + _derive_homework_from_weekplans(entry, weeklyplans)
 
 
 def _pretty_title_case(s: str) -> str:
@@ -394,6 +605,8 @@ def _build_homework_markdown(items: list[dict[str, Any]]) -> str:
         by_date.setdefault(dato, {}).setdefault(barn, {}).setdefault(fag, [])
 
         block = tekst
+        if it.get("derived"):
+            block = f"{block}\n_Kilde: ugeplan_" if block else "_Kilde: ugeplan_"
         for l in links:
             t = (l.get("tekst") or "link").strip()
             u = (l.get("url") or "").strip()
@@ -662,13 +875,13 @@ class ForaeldreIntraAllHomeworkSensor(ForaeldreIntraBaseSensor):
 
     @property
     def native_value(self) -> int:
-        items = (self.coordinator.data or {}).get("items", [])
+        items = _merge_homework_items(self._entry, self.coordinator.data or {})
         filtered = _filter_items(self._entry, items, child=None)
         return len(filtered)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        items = (self.coordinator.data or {}).get("items", [])
+        items = _merge_homework_items(self._entry, self.coordinator.data or {})
         filtered = _filter_items(self._entry, items, child=None)
 
         attrs: dict[str, Any] = {"items": filtered}
@@ -693,16 +906,25 @@ class ForaeldreIntraChildHomeworkSensor(ForaeldreIntraBaseSensor):
 
     @property
     def native_value(self) -> int:
-        items = (self.coordinator.data or {}).get("items", [])
+        items = _merge_homework_items(self._entry, self.coordinator.data or {})
         filtered = _filter_items(self._entry, items, child=self._child)
         return len(filtered)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        items = (self.coordinator.data or {}).get("items", [])
+        items = _merge_homework_items(self._entry, self.coordinator.data or {})
         filtered = _filter_items(self._entry, items, child=self._child)
 
-        attrs: dict[str, Any] = {"items": filtered}
+        attrs: dict[str, Any] = {
+            "items": filtered,
+            "weekplan_derived_homework_enabled": bool(
+                self._entry.options.get(
+                    OPT_WEEKPLAN_DERIVED_HOMEWORK_ENABLED,
+                    DEFAULT_WEEKPLAN_DERIVED_HOMEWORK_ENABLED,
+                )
+            ),
+            "weekplan_derived_homework_keywords": _weekplan_keywords(self._entry),
+        }
         if bool(
             self._entry.options.get(
                 OPT_ADD_HOMEWORK_MARKDOWN,

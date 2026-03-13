@@ -38,7 +38,9 @@
           "show_weekplan_focus_sensors": "Show separate weekly plan focus sensor",
           "show_weekplan_schedule_sensors": "Show separate weekly plan schedule sensor",
           "add_weekplan_markdown": "Add markdown to weekly plan",
-          "subject_aliases": "Subject aliases (e.g. BOOS=Booster, SVØM=Svømning, MAS=)"
+          "subject_aliases": "Subject aliases (e.g. BOOS=Booster, SVØM=Svømning, MAS=)",
+          "weekplan_derived_homework_enabled": "Add derived homework from weekly plan",
+          "weekplan_derived_homework_keywords": "Weekly plan keywords for derived homework (e.g. diktatord, øveord)"
         }
       }
     }

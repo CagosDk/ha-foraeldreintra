@@ -38,7 +38,9 @@
           "show_weekplan_focus_sensors": "Vis separat sensor for ugeplan fokus",
           "show_weekplan_schedule_sensors": "Vis separat sensor for ugeplan skema",
           "add_weekplan_markdown": "Tilføj markdown til ugeplan",
-          "subject_aliases": "Fag-oversættelser (fx BOOS=Booster, SVØM=Svømning, MAS=)"
+          "subject_aliases": "Fag-oversættelser (fx BOOS=Booster, SVØM=Svømning, MAS=)",
+          "weekplan_derived_homework_enabled": "Tilføj afledte lektier fra ugeplan",
+          "weekplan_derived_homework_keywords": "Nøgleord til afledte lektier fra ugeplan (fx diktatord, øveord)"
         }
       }
     }
