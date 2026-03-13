@@ -24,6 +24,8 @@ from .const import (
     DEFAULT_SHOW_WEEKPLAN_SCHEDULE_SENSORS,
     DEFAULT_SHOW_WEEKPLAN_SENSORS,
     DEFAULT_SUBJECT_ALIASES,
+    DEFAULT_WEEKPLAN_DERIVED_HOMEWORK_ENABLED,
+    DEFAULT_WEEKPLAN_DERIVED_HOMEWORK_KEYWORDS,
     DOMAIN,
     OPT_ADD_HOMEWORK_MARKDOWN,
     OPT_ADD_WEEKPLAN_MARKDOWN,
@@ -38,6 +40,8 @@ from .const import (
     OPT_SHOW_WEEKPLAN_SCHEDULE_SENSORS,
     OPT_SHOW_WEEKPLAN_SENSORS,
     OPT_SUBJECT_ALIASES,
+    OPT_WEEKPLAN_DERIVED_HOMEWORK_ENABLED,
+    OPT_WEEKPLAN_DERIVED_HOMEWORK_KEYWORDS,
 )
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
@@ -128,6 +132,19 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             cleaned[OPT_ADD_HOMEWORK_MARKDOWN] = bool(
                 cleaned.get(OPT_ADD_HOMEWORK_MARKDOWN, DEFAULT_ADD_HOMEWORK_MARKDOWN)
             )
+            cleaned[OPT_WEEKPLAN_DERIVED_HOMEWORK_ENABLED] = bool(
+                cleaned.get(
+                    OPT_WEEKPLAN_DERIVED_HOMEWORK_ENABLED,
+                    DEFAULT_WEEKPLAN_DERIVED_HOMEWORK_ENABLED,
+                )
+            )
+            cleaned[OPT_WEEKPLAN_DERIVED_HOMEWORK_KEYWORDS] = str(
+                cleaned.get(
+                    OPT_WEEKPLAN_DERIVED_HOMEWORK_KEYWORDS,
+                    ", ".join(DEFAULT_WEEKPLAN_DERIVED_HOMEWORK_KEYWORDS),
+                )
+                or ""
+            ).strip()
 
             cleaned[OPT_SHOW_WEEKPLAN_SENSORS] = bool(
                 cleaned.get(OPT_SHOW_WEEKPLAN_SENSORS, DEFAULT_SHOW_WEEKPLAN_SENSORS)
@@ -228,6 +245,27 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 default=existing.get(OPT_ADD_HOMEWORK_MARKDOWN, DEFAULT_ADD_HOMEWORK_MARKDOWN),
             )
         ] = bool
+        schema_dict[
+            vol.Required(
+                OPT_WEEKPLAN_DERIVED_HOMEWORK_ENABLED,
+                default=existing.get(
+                    OPT_WEEKPLAN_DERIVED_HOMEWORK_ENABLED,
+                    DEFAULT_WEEKPLAN_DERIVED_HOMEWORK_ENABLED,
+                ),
+            )
+        ] = bool
+        schema_dict[
+            vol.Optional(
+                OPT_WEEKPLAN_DERIVED_HOMEWORK_KEYWORDS,
+                default=str(
+                    existing.get(
+                        OPT_WEEKPLAN_DERIVED_HOMEWORK_KEYWORDS,
+                        ", ".join(DEFAULT_WEEKPLAN_DERIVED_HOMEWORK_KEYWORDS),
+                    )
+                    or ""
+                ),
+            )
+        ] = str
 
         schema_dict[
             vol.Required(
