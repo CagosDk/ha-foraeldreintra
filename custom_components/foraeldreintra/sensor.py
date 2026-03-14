@@ -249,10 +249,27 @@ def _derive_homework_title_from_prefix(prefix: str) -> str:
     return title[:1].upper() + title[1:]
 
 
+def _derive_day_match_from_prefix(prefix: str) -> str:
+    cleaned = re.sub(r"\s+", " ", (prefix or "").strip(" :-"))
+    if not cleaned:
+        return ""
+
+    lowered = cleaned.lower()
+
+    if "diktatord" in lowered:
+        return "diktat"
+    if "diktat" in lowered:
+        return "diktat"
+    if "læs" in lowered:
+        return "læs"
+
+    return cleaned.lower()
+
+
 def _extract_practice_text_from_general_content(
     content_text: str,
     keywords: list[str],
-) -> tuple[str, str] | None:
+) -> tuple[str, str, str] | None:
     for raw_line in (content_text or "").splitlines():
         line = raw_line.strip()
         if not line or ":" not in line:
@@ -266,7 +283,11 @@ def _extract_practice_text_from_general_content(
 
         prefix_lower = prefix_clean.lower()
         if any(keyword in prefix_lower for keyword in keywords):
-            return (_derive_homework_title_from_prefix(prefix_clean), suffix_clean)
+            return (
+                _derive_homework_title_from_prefix(prefix_clean),
+                suffix_clean,
+                _derive_day_match_from_prefix(prefix_clean),
+            )
 
     return None
 
@@ -308,8 +329,8 @@ def _derive_homework_from_weekplans(
             if not match:
                 continue
 
-            task_title, practice_text = match
-            task_title_lower = task_title.lower()
+            task_title, practice_text, day_match_text = match
+            day_match_text = (day_match_text or "").lower()
 
             for day in days:
                 lesson_plans = day.get("lesson_plans", []) if isinstance(day.get("lesson_plans"), list) else []
