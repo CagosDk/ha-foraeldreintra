@@ -374,7 +374,7 @@ def _format_header(date_iso: str) -> str:
 
     dt = datetime(d.year, d.month, d.day)
     wd = DK_WEEKDAY[(dt.weekday() + 1) % 7]
-    return f"# {wd} d.{d.day} {DK_MONTH[d.month - 1]} {d.year}"
+    return f"# {wd} d.{d.day}. {DK_MONTH[d.month - 1]} {d.year}"
 
 
 def _parse_subject_aliases(raw: str | None) -> dict[str, str]:
@@ -606,7 +606,8 @@ def _build_homework_markdown(items: list[dict[str, Any]]) -> str:
 
         block = tekst
         if it.get("derived"):
-            block = f"{block} \n*(Kilde: ugeplan)*" if block else "*(Kilde: ugeplan)*"
+            block = f"{block}\n*(Kilde: ugeplan)*" if block else "*(Kilde: ugeplan)*"
+
         for l in links:
             t = (l.get("tekst") or "link").strip()
             u = (l.get("url") or "").strip()
@@ -629,15 +630,17 @@ def _build_homework_markdown(items: list[dict[str, Any]]) -> str:
             subjects = sorted(by_date[d_iso][child].keys())
 
             for subject in subjects:
-                subject_blocks = [f"{subject}:"]
+                subject_lines: list[str] = [f"**{subject}**  "]
+
                 for b in by_date[d_iso][child][subject]:
                     if b:
-                        subject_blocks.append(b)
-                child_parts.append("\n".join(subject_blocks))
+                        subject_lines.append(b)
+
+                child_parts.append("\n".join(subject_lines))
 
             day_parts.append("\n\n".join(child_parts))
 
-        parts.append("\n\n".join(day_parts))
+        parts.append("\n\n\n".join(day_parts))
 
     return "\n\n<hr>\n\n".join(parts).strip() if parts else "Ingen lektier fundet."
 
