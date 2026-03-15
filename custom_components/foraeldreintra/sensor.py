@@ -12,6 +12,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import slugify
 
 from .const import (
+    DATA_HOMEWORK_STATUS_STORE,
     DEFAULT_ADD_HOMEWORK_MARKDOWN,
     DEFAULT_ADD_WEEKPLAN_MARKDOWN,
     DEFAULT_DISPLAY_PERIOD,
@@ -44,6 +45,8 @@ from .const import (
     OPT_WEEKPLAN_DERIVED_HOMEWORK_KEYWORDS,
 )
 from .coordinator import ForaldreIntraCoordinator
+from .homework_ids import build_homework_id
+from .homework_status import HomeworkStatusStore
 
 DK_WEEKDAY = ["Søndag", "Mandag", "Tirsdag", "Onsdag", "Torsdag", "Fredag", "Lørdag"]
 DK_MONTH = [
@@ -789,6 +792,43 @@ def _plan_schedule_only(plan: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _get_status_store(hass: HomeAssistant, entry: ConfigEntry) -> HomeworkStatusStore | None:
+    domain_data = hass.data.get(DOMAIN, {})
+    status_store_map = domain_data.get(DATA_HOMEWORK_STATUS_STORE, {})
+    if not isinstance(status_store_map, dict):
+        return None
+    store = status_store_map.get(entry.entry_id)
+    return store if isinstance(store, HomeworkStatusStore) else None
+
+
+def _decorate_homework_items(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    items: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    status_store = _get_status_store(hass, entry)
+    decorated: list[dict[str, Any]] = []
+
+    for item in items:
+        normalized = dict(item)
+
+        homework_id = build_homework_id(
+            child_name=(normalized.get("barn") or ""),
+            date_text=(normalized.get("dato") or ""),
+            subject=(normalized.get("fag") or ""),
+            title=(normalized.get("title") or ""),
+            description=(normalized.get("tekst") or ""),
+            source=(normalized.get("source") or "homework"),
+        )
+
+        normalized["homework_id"] = homework_id
+        normalized["completed"] = status_store.is_completed(homework_id) if status_store else False
+
+        decorated.append(normalized)
+
+    return decorated
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -827,14 +867,14 @@ async def async_setup_entry(
     )
 
     if show_homework:
-        entities.append(ForaeldreIntraAllHomeworkSensor(coordinator, entry))
+        entities.append(ForaeldreIntraAllHomeworkSensor(hass, coordinator, entry))
 
     for child_name in children:
         if selected_children and child_name not in set(selected_children):
             continue
 
         if show_homework:
-            entities.append(ForaeldreIntraChildHomeworkSensor(coordinator, entry, child_name))
+            entities.append(ForaeldreIntraChildHomeworkSensor(hass, coordinator, entry, child_name))
 
         if show_weekplan:
             entities.append(ForaeldreIntraChildWeekplanSensor(coordinator, entry, child_name))
@@ -872,19 +912,22 @@ class ForaeldreIntraAllHomeworkSensor(ForaeldreIntraBaseSensor):
     _attr_name = "ForældreIntra lektier (alle)"
     _attr_icon = "mdi:book-open-page-variant"
 
-    def __init__(self, coordinator: ForaldreIntraCoordinator, entry: ConfigEntry) -> None:
+    def __init__(self, hass: HomeAssistant, coordinator: ForaldreIntraCoordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator, entry)
+        self._hass = hass
         self._attr_unique_id = f"{entry.entry_id}_homework_all"
 
     @property
     def native_value(self) -> int:
         items = _merge_homework_items(self._entry, self.coordinator.data or {})
+        items = _decorate_homework_items(self._hass, self._entry, items)
         filtered = _filter_items(self._entry, items, child=None)
         return len(filtered)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         items = _merge_homework_items(self._entry, self.coordinator.data or {})
+        items = _decorate_homework_items(self._hass, self._entry, items)
         filtered = _filter_items(self._entry, items, child=None)
 
         attrs: dict[str, Any] = {"items": filtered}
@@ -901,8 +944,9 @@ class ForaeldreIntraAllHomeworkSensor(ForaeldreIntraBaseSensor):
 class ForaeldreIntraChildHomeworkSensor(ForaeldreIntraBaseSensor):
     _attr_icon = "mdi:book-account"
 
-    def __init__(self, coordinator: ForaldreIntraCoordinator, entry: ConfigEntry, child_name: str) -> None:
+    def __init__(self, hass: HomeAssistant, coordinator: ForaldreIntraCoordinator, entry: ConfigEntry, child_name: str) -> None:
         super().__init__(coordinator, entry)
+        self._hass = hass
         self._child = child_name
         self._attr_name = f"ForældreIntra lektier ({child_name})"
         self._attr_unique_id = f"{entry.entry_id}_homework_{slugify(child_name)}"
@@ -910,12 +954,14 @@ class ForaeldreIntraChildHomeworkSensor(ForaeldreIntraBaseSensor):
     @property
     def native_value(self) -> int:
         items = _merge_homework_items(self._entry, self.coordinator.data or {})
+        items = _decorate_homework_items(self._hass, self._entry, items)
         filtered = _filter_items(self._entry, items, child=self._child)
         return len(filtered)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         items = _merge_homework_items(self._entry, self.coordinator.data or {})
+        items = _decorate_homework_items(self._hass, self._entry, items)
         filtered = _filter_items(self._entry, items, child=self._child)
 
         attrs: dict[str, Any] = {
