@@ -237,9 +237,6 @@ def _derive_homework_title_from_prefix(prefix: str) -> str:
         return "Øveopgave"
 
     lowered = cleaned.lower()
-
-    if "diktatord" in lowered:
-        return "Diktatord"
     if "diktat" in lowered:
         return "Diktat"
     if "læs" in lowered:
@@ -335,11 +332,7 @@ def _derive_homework_from_weekplans(
                             "barn": child_name,
                             "dato": iso_date,
                             "fag": subject or "Ukendt fag",
-                            "tekst": (
-                                f"{task_title}: {practice_text}"
-                                if task_title == "Diktatord"
-                                else f"{task_title}: Øv {practice_text}"
-                            ),
+                            "tekst": f"{task_title}: Øv {practice_text}",
                             "links": [],
                             "source": "weekplan",
                             "derived": True,
