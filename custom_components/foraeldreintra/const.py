@@ -1,3 +1,5 @@
+
+
 DOMAIN = "foraeldreintra"
 
 CONF_SCHOOL_URL = "school_url"
@@ -59,3 +61,8 @@ DEFAULT_WEEKPLAN_DERIVED_HOMEWORK_ENABLED = False
 
 OPT_WEEKPLAN_DERIVED_HOMEWORK_KEYWORDS = "weekplan_derived_homework_keywords"
 DEFAULT_WEEKPLAN_DERIVED_HOMEWORK_KEYWORDS = ["diktatord", "øveord", "ord til diktat"]
+
+STORAGE_VERSION = 1
+STORAGE_KEY = f"{DOMAIN}_homework_status"
+
+DATA_HOMEWORK_STATUS_STORE = "homework_status_store"
