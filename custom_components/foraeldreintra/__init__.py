@@ -5,6 +5,8 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import slugify
 
+from .const import DATA_HOMEWORK_STATUS_STORE, DOMAIN
+from .homework_status import HomeworkStatusStore
 from .const import DOMAIN, PLATFORMS, OPT_SELECTED_CHILDREN
 from .coordinator import ForaldreIntraCoordinator
 
