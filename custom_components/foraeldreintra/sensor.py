@@ -332,7 +332,7 @@ def _derive_homework_from_weekplans(
                             "barn": child_name,
                             "dato": iso_date,
                             "fag": subject or "Ukendt fag",
-                            "tekst": f"{task_title}: Øv {practice_text}",
+                            "tekst": f"{task_title}: {practice_text}",
                             "links": [],
                             "source": "weekplan",
                             "derived": True,
@@ -606,7 +606,7 @@ def _build_homework_markdown(items: list[dict[str, Any]]) -> str:
 
         block = tekst
         if it.get("derived"):
-            block = f"{block}\n_Kilde: ugeplan_" if block else "_Kilde: ugeplan_"
+            block = f"{block} \n*(Kilde: ugeplan)*" if block else "*(Kilde: ugeplan)*"
         for l in links:
             t = (l.get("tekst") or "link").strip()
             u = (l.get("url") or "").strip()
@@ -633,7 +633,7 @@ def _build_homework_markdown(items: list[dict[str, Any]]) -> str:
                 for b in by_date[d_iso][child][subject]:
                     if b:
                         subject_blocks.append(b)
-                child_parts.append("\n\n".join(subject_blocks))
+                child_parts.append("\n".join(subject_blocks))
 
             day_parts.append("\n\n".join(child_parts))
 
