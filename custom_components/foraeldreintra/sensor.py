@@ -128,8 +128,6 @@ def _filter_items(
 ) -> list[dict[str, Any]]:
     selected_children: list[str] = entry.options.get(OPT_SELECTED_CHILDREN, [])
     selected_set = set(selected_children)
-    period = entry.options.get(OPT_DISPLAY_PERIOD, DEFAULT_DISPLAY_PERIOD)
-    today = date.today()
 
     out: list[dict[str, Any]] = []
 
@@ -140,14 +138,6 @@ def _filter_items(
             continue
         if child is not None and barn != child:
             continue
-
-        d = _parse_iso_date(it.get("dato"))
-        if period == "today_and_future":
-            if d is not None and d < today:
-                continue
-        elif period == "future_only":
-            if d is not None and d <= today:
-                continue
 
         out.append(it)
 
