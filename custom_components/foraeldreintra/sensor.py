@@ -237,17 +237,16 @@ def _formatted_date_to_iso(formatted_date: str | None, default_year: int | None)
 def _derive_homework_title_from_prefix(prefix: str) -> str:
     cleaned = re.sub(r"\s+", " ", (prefix or "").strip(" :-"))
     if not cleaned:
-        return "Øveopgave"
+        return "Lektie"
 
     lowered = cleaned.lower()
     if "diktat" in lowered:
-        return "Diktat"
+        return "Diktatord"
     if "læs" in lowered:
         return "Læsning"
 
     title = cleaned.rstrip(":")
     return title[:1].upper() + title[1:]
-
 
 def _extract_practice_text_from_general_content(
     content_text: str,
