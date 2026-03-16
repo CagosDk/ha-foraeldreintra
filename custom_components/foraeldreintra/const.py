@@ -1,5 +1,3 @@
-
-
 DOMAIN = "foraeldreintra"
 
 CONF_SCHOOL_URL = "school_url"
@@ -10,9 +8,6 @@ PLATFORMS = ["sensor"]
 
 # Options
 OPT_SELECTED_CHILDREN = "selected_children"
-
-OPT_DISPLAY_PERIOD = "display_period"
-DEFAULT_DISPLAY_PERIOD = "today_and_future"
 
 # Lektier
 OPT_SHOW_HOMEWORK_SENSORS = "show_homework_sensors"
