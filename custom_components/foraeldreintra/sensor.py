@@ -259,6 +259,32 @@ def _extract_practice_text_from_general_content(
     return None
 
 
+def _lesson_matches_practice_marker(
+    lesson_text: str,
+    task_title: str,
+    keywords: list[str],
+) -> bool:
+    lesson_lower = (lesson_text or "").strip().lower()
+    if not lesson_lower:
+        return False
+
+    title_lower = (task_title or "").strip().lower()
+    if title_lower and title_lower in lesson_lower:
+        return True
+
+    # Gør diktat/diktatord tolerant uden at hardcode keywords i const.py
+    if title_lower == "diktatord" and "diktat" in lesson_lower:
+        return True
+
+    # Brug også brugerens keywords som fallback-match
+    for keyword in keywords:
+        kw = (keyword or "").strip().lower()
+        if kw and kw in lesson_lower:
+            return True
+
+    return False
+
+
 def _derive_homework_from_weekplans(
     entry: ConfigEntry,
     weeklyplans: dict[str, dict[str, Any]],
@@ -297,7 +323,6 @@ def _derive_homework_from_weekplans(
                 continue
 
             task_title, practice_text = match
-            task_title_lower = task_title.lower()
 
             for day in days:
                 lesson_plans = day.get("lesson_plans", []) if isinstance(day.get("lesson_plans"), list) else []
@@ -315,7 +340,7 @@ def _derive_homework_from_weekplans(
                         continue
                     if subject_normalized and lesson_subject and lesson_subject != subject_normalized:
                         continue
-                    if task_title_lower not in lesson_text.lower():
+                    if not _lesson_matches_practice_marker(lesson_text, task_title, keywords):
                         continue
 
                     derived.append(
