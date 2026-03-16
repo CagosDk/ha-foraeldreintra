@@ -236,6 +236,7 @@ def _derive_homework_title_from_prefix(prefix: str) -> str:
     title = cleaned.rstrip(":")
     return title[:1].upper() + title[1:]
 
+
 def _extract_practice_text_from_general_content(
     content_text: str,
     keywords: list[str],
