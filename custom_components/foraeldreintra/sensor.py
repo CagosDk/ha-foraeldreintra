@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from datetime import date, datetime
 from typing import Any
+from urllib.parse import unquote
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
@@ -110,6 +111,108 @@ STANDARD_SUBJECT_ALIASES = {
 }
 
 
+def _decode_display_value(value: Any) -> Any:
+    """Dekoder URL-encoded tekst til læsbar visning."""
+    if value is None:
+        return value
+    if not isinstance(value, str):
+        return value
+    return unquote(value).strip()
+
+
+def _decode_link_dict(link: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **link,
+        "tekst": _decode_display_value(link.get("tekst")),
+        "url": _decode_display_value(link.get("url")),
+    }
+
+
+def _decode_homework_item(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **item,
+        "barn": _decode_display_value(item.get("barn")) or "",
+        "fag": _decode_display_value(item.get("fag")) or "",
+        "tekst": _decode_display_value(item.get("tekst")) or "",
+        "title": _decode_display_value(item.get("title")) or "",
+        "keyword_match": _decode_display_value(item.get("keyword_match")) or "",
+        "weekplan_day": _decode_display_value(item.get("weekplan_day")) or "",
+        "weekplan_date": _decode_display_value(item.get("weekplan_date")) or "",
+        "source": _decode_display_value(item.get("source")) or item.get("source"),
+        "links": [
+            _decode_link_dict(link)
+            for link in (item.get("links") or [])
+            if isinstance(link, dict)
+        ],
+    }
+
+
+def _decode_weekplan_item(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **item,
+        "subject": _decode_display_value(item.get("subject")) or "",
+        "type": _decode_display_value(item.get("type")) or item.get("type"),
+        "content_text": _decode_display_value(item.get("content_text")) or "",
+        "title": _decode_display_value(item.get("title")) or "",
+        "url": _decode_display_value(item.get("url")) or item.get("url"),
+    }
+
+
+def _decode_schedule_row(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **row,
+        "time": _decode_display_value(row.get("time")) or "",
+        "subject_short": _decode_display_value(row.get("subject_short")) or "",
+        "subject_full": _decode_display_value(row.get("subject_full")) or "",
+        "title": _decode_display_value(row.get("title")) or "",
+    }
+
+
+def _decode_weekplan_day(day: dict[str, Any]) -> dict[str, Any]:
+    lesson_plans = day.get("lesson_plans") or []
+    schedule = day.get("schedule") or []
+
+    decoded_lessons = [
+        {
+            **lesson,
+            "subject": _decode_display_value(lesson.get("subject")) or "",
+            "content_text": _decode_display_value(lesson.get("content_text")) or "",
+            "title": _decode_display_value(lesson.get("title")) or "",
+        }
+        for lesson in lesson_plans
+        if isinstance(lesson, dict)
+    ]
+
+    decoded_schedule = [
+        _decode_schedule_row(row)
+        for row in schedule
+        if isinstance(row, dict)
+    ]
+
+    return {
+        **day,
+        "day": _decode_display_value(day.get("day")) or "",
+        "formatted_date": _decode_display_value(day.get("formatted_date")) or "",
+        "lesson_plans": decoded_lessons,
+        "schedule": decoded_schedule,
+    }
+
+
+def _decode_weekplan(plan: dict[str, Any]) -> dict[str, Any]:
+    items = plan.get("items") or []
+    days = plan.get("days") or []
+
+    return {
+        **plan,
+        "title": _decode_display_value(plan.get("title")) or "",
+        "week": _decode_display_value(plan.get("week")) or plan.get("week"),
+        "url": _decode_display_value(plan.get("url")) or plan.get("url"),
+        "class_or_group": _decode_display_value(plan.get("class_or_group")) or "",
+        "items": [_decode_weekplan_item(item) for item in items if isinstance(item, dict)],
+        "days": [_decode_weekplan_day(day) for day in days if isinstance(day, dict)],
+    }
+
+
 def _parse_iso_date(s: str | None) -> date | None:
     if not s:
         return None
@@ -124,13 +227,17 @@ def _filter_items(
     items: list[dict[str, Any]],
     child: str | None = None,
 ) -> list[dict[str, Any]]:
-    selected_children: list[str] = entry.options.get(OPT_SELECTED_CHILDREN, [])
+    selected_children: list[str] = [
+        _decode_display_value(name) for name in entry.options.get(OPT_SELECTED_CHILDREN, [])
+    ]
     selected_set = set(selected_children)
+
+    child = _decode_display_value(child) if child is not None else None
 
     out: list[dict[str, Any]] = []
 
     for it in items:
-        barn = (it.get("barn") or "").strip()
+        barn = _decode_display_value(it.get("barn") or "").strip()
 
         if selected_children and barn not in selected_set:
             continue
@@ -175,12 +282,12 @@ def _weekplan_keywords(entry: ConfigEntry) -> list[str]:
 
 
 def _normalize_subject_value(value: str | None) -> str:
-    return re.sub(r"\s+", " ", (value or "").strip()).lower()
+    return re.sub(r"\s+", " ", (_decode_display_value(value) or "").strip()).lower()
 
 
 def _extract_year_from_weekplan(plan: dict[str, Any]) -> int | None:
     for candidate in [plan.get("url"), plan.get("week"), plan.get("title")]:
-        text = (candidate or "").strip()
+        text = (_decode_display_value(candidate) or "").strip()
         match = re.search(r"(?:/|^)(\d{1,2})-(\d{4})(?:$|[^\d])", text)
         if match:
             return int(match.group(2))
@@ -193,7 +300,7 @@ def _extract_year_from_weekplan(plan: dict[str, Any]) -> int | None:
 
 
 def _formatted_date_to_iso(formatted_date: str | None, default_year: int | None) -> str | None:
-    text = (formatted_date or "").strip()
+    text = (_decode_display_value(formatted_date) or "").strip()
     if not text:
         return None
 
@@ -220,7 +327,7 @@ def _formatted_date_to_iso(formatted_date: str | None, default_year: int | None)
 
 
 def _derive_homework_title_from_prefix(prefix: str) -> str:
-    cleaned = re.sub(r"\s+", " ", (prefix or "").strip(" :-"))
+    cleaned = re.sub(r"\s+", " ", (_decode_display_value(prefix) or "").strip(" :-"))
     if not cleaned:
         return "Lektie"
 
@@ -238,7 +345,7 @@ def _extract_practice_text_from_general_content(
     content_text: str,
     keywords: list[str],
 ) -> tuple[str, str] | None:
-    for raw_line in (content_text or "").splitlines():
+    for raw_line in (_decode_display_value(content_text) or "").splitlines():
         line = raw_line.strip()
         if not line or ":" not in line:
             continue
@@ -261,11 +368,11 @@ def _lesson_matches_practice_marker(
     task_title: str,
     keywords: list[str],
 ) -> bool:
-    lesson_lower = (lesson_text or "").strip().lower()
+    lesson_lower = (_decode_display_value(lesson_text) or "").strip().lower()
     if not lesson_lower:
         return False
 
-    title_lower = (task_title or "").strip().lower()
+    title_lower = (_decode_display_value(task_title) or "").strip().lower()
     if title_lower and title_lower in lesson_lower:
         return True
 
@@ -299,7 +406,9 @@ def _derive_homework_from_weekplans(
 
     derived: list[dict[str, Any]] = []
 
-    for child_name, plan in (weeklyplans or {}).items():
+    for child_name_raw, raw_plan in (weeklyplans or {}).items():
+        child_name = _decode_display_value(child_name_raw) or ""
+        plan = _decode_weekplan(raw_plan or {})
         items = plan.get("items", []) if isinstance(plan.get("items"), list) else []
         days = plan.get("days", []) if isinstance(plan.get("days"), list) else []
         year = _extract_year_from_weekplan(plan)
@@ -308,7 +417,7 @@ def _derive_homework_from_weekplans(
             if general_item.get("type") != "general":
                 continue
 
-            subject = (general_item.get("subject") or "").strip()
+            subject = (_decode_display_value(general_item.get("subject")) or "").strip()
             subject_normalized = _normalize_subject_value(subject)
             match = _extract_practice_text_from_general_content(
                 general_item.get("content_text") or "",
@@ -321,16 +430,15 @@ def _derive_homework_from_weekplans(
 
             for day in days:
                 lesson_plans = day.get("lesson_plans", []) if isinstance(day.get("lesson_plans"), list) else []
-                formatted_date = (day.get("formatted_date") or "").strip()
+                formatted_date = (_decode_display_value(day.get("formatted_date")) or "").strip()
                 iso_date = _formatted_date_to_iso(formatted_date, year)
 
                 if not iso_date:
                     continue
 
-                    
                 for lesson in lesson_plans:
                     lesson_subject = _normalize_subject_value(lesson.get("subject"))
-                    lesson_text = (lesson.get("content_text") or "").strip()
+                    lesson_text = (_decode_display_value(lesson.get("content_text")) or "").strip()
 
                     if not lesson_text:
                         continue
@@ -356,6 +464,7 @@ def _derive_homework_from_weekplans(
                     )
                     break
 
+    derived = [_decode_homework_item(item) for item in derived]
     derived.sort(
         key=lambda x: ((x.get("dato") or ""), (x.get("barn") or ""), (x.get("fag") or ""))
     )
@@ -366,13 +475,16 @@ def _merge_homework_items(
     entry: ConfigEntry,
     data: dict[str, Any],
 ) -> list[dict[str, Any]]:
-    base_items = list((data or {}).get("items", []) or [])
-    weeklyplans = (data or {}).get("weeklyplans", {}) or {}
+    base_items = [_decode_homework_item(item) for item in list((data or {}).get("items", []) or [])]
+    weeklyplans = {
+        _decode_display_value(child_name) or "": _decode_weekplan(plan or {})
+        for child_name, plan in ((data or {}).get("weeklyplans", {}) or {}).items()
+    }
     return base_items + _derive_homework_from_weekplans(entry, weeklyplans)
 
 
 def _pretty_title_case(s: str) -> str:
-    s = (s or "").strip()
+    s = (_decode_display_value(s) or "").strip()
     if not s:
         return s
     lower = s.lower()
@@ -402,7 +514,7 @@ def _parse_subject_aliases(raw: str | None) -> dict[str, str]:
 
         key, value = line.split("=", 1)
         key = key.strip().upper()
-        value = value.strip()
+        value = _decode_display_value(value) or ""
 
         if key:
             aliases[key] = value
@@ -411,7 +523,7 @@ def _parse_subject_aliases(raw: str | None) -> dict[str, str]:
 
 
 def _apply_subject_alias(label: str, alias_map: dict[str, str]) -> str:
-    cleaned = (label or "").strip()
+    cleaned = (_decode_display_value(label) or "").strip()
     if not cleaned:
         return ""
 
@@ -423,16 +535,16 @@ def _apply_subject_alias(label: str, alias_map: dict[str, str]) -> str:
 
 
 def _raw_schedule_key(row: dict[str, Any]) -> str:
-    subject_short = (row.get("subject_short") or "").strip()
-    subject_full = (row.get("subject_full") or "").strip()
-    title_str = (row.get("title") or "").strip()
+    subject_short = (_decode_display_value(row.get("subject_short")) or "").strip()
+    subject_full = (_decode_display_value(row.get("subject_full")) or "").strip()
+    title_str = (_decode_display_value(row.get("title")) or "").strip()
     return (subject_short or subject_full or title_str).strip()
 
 
 def _normalize_schedule_label(row: dict[str, Any], alias_map: dict[str, str]) -> str:
-    subject_full = (row.get("subject_full") or "").strip()
-    subject_short = (row.get("subject_short") or "").strip()
-    title_str = (row.get("title") or "").strip()
+    subject_full = (_decode_display_value(row.get("subject_full")) or "").strip()
+    subject_short = (_decode_display_value(row.get("subject_short")) or "").strip()
+    title_str = (_decode_display_value(row.get("title")) or "").strip()
 
     label = subject_full or subject_short or title_str
     label = _apply_subject_alias(label, alias_map)
@@ -440,7 +552,7 @@ def _normalize_schedule_label(row: dict[str, Any], alias_map: dict[str, str]) ->
 
 
 def _is_secondary_subject(label: str) -> bool:
-    label_upper = (label or "").strip().upper()
+    label_upper = (_decode_display_value(label) or "").strip().upper()
     if not label_upper:
         return True
     return label_upper in SECONDARY_SUBJECTS
@@ -454,7 +566,7 @@ def _combine_schedule_rows(
     order: list[str] = []
 
     for row in schedule_rows:
-        time_str = (row.get("time") or "").strip()
+        time_str = (_decode_display_value(row.get("time")) or "").strip()
         raw_key = _raw_schedule_key(row)
         label = _normalize_schedule_label(row, alias_map)
 
@@ -501,7 +613,7 @@ def _combine_schedule_rows(
 
 
 def _week_short(week_value: str | None) -> str:
-    text = (week_value or "").strip()
+    text = (_decode_display_value(week_value) or "").strip()
     if not text:
         return ""
     match = re.match(r"^(\d{1,2})-\d{4}$", text)
@@ -511,18 +623,18 @@ def _week_short(week_value: str | None) -> str:
 
 
 def _build_display_title(plan: dict[str, Any]) -> str:
-    class_or_group = (plan.get("class_or_group") or "").strip()
+    class_or_group = (_decode_display_value(plan.get("class_or_group")) or "").strip()
     week = _week_short(plan.get("week"))
 
     if class_or_group and week:
         return f"Ugeplan for {class_or_group} - uge {week}"
     if week:
         return f"Ugeplan - uge {week}"
-    return (plan.get("title") or "").strip()
+    return (_decode_display_value(plan.get("title")) or "").strip()
 
 
 def _expand_formatted_date(date_text: str) -> str:
-    text = (date_text or "").strip()
+    text = (_decode_display_value(date_text) or "").strip()
     if not text:
         return ""
 
@@ -537,7 +649,7 @@ def _expand_formatted_date(date_text: str) -> str:
 
 
 def _format_day_header(day: dict[str, Any]) -> str:
-    header = (day.get("day") or "").strip()
+    header = (_decode_display_value(day.get("day")) or "").strip()
     formatted_date = _expand_formatted_date(day.get("formatted_date"))
     if formatted_date:
         header = f"{header} {formatted_date}".strip()
@@ -545,7 +657,7 @@ def _format_day_header(day: dict[str, Any]) -> str:
 
 
 def _looks_like_date_heading(text: str) -> bool:
-    s = (text or "").strip()
+    s = (_decode_display_value(text) or "").strip()
     if not s.endswith(":"):
         return False
 
@@ -563,7 +675,7 @@ def _looks_like_date_heading(text: str) -> bool:
 
 
 def _format_general_content(text: str) -> str:
-    lines = [(line or "").strip() for line in (text or "").splitlines()]
+    lines = [(_decode_display_value(line) or "").strip() for line in (text or "").splitlines()]
     lines = [line for line in lines if line]
     if not lines:
         return ""
@@ -593,7 +705,8 @@ def _format_general_content(text: str) -> str:
 def _build_homework_markdown(items: list[dict[str, Any]]) -> str:
     by_date: dict[str, dict[str, dict[str, list[str]]]] = {}
 
-    for it in items:
+    for raw_item in items:
+        it = _decode_homework_item(raw_item)
         dato = (it.get("dato") or "").strip()
         barn = (it.get("barn") or "").strip() or "Ukendt"
         fag = (it.get("fag") or "").strip()
@@ -621,8 +734,8 @@ def _build_homework_markdown(items: list[dict[str, Any]]) -> str:
             block = f"{block}\n*(Kilde: ugeplan)*" if block else "*(Kilde: ugeplan)*"
 
         for l in links:
-            t = (l.get("tekst") or "link").strip()
-            u = (l.get("url") or "").strip()
+            t = (_decode_display_value(l.get("tekst")) or "link").strip()
+            u = (_decode_display_value(l.get("url")) or "").strip()
             if u:
                 if block:
                     block += "\n"
@@ -664,6 +777,7 @@ def _build_weekplan_markdown(
     include_schedule: bool,
     alias_map: dict[str, str],
 ) -> str:
+    plan = _decode_weekplan(plan)
     title = _build_display_title(plan)
     items = plan.get("items") or []
     days = plan.get("days") or []
@@ -691,13 +805,13 @@ def _build_weekplan_markdown(
         markdown_parts.append("## Generelt")
 
         for idx, item in enumerate(general_items):
-            subject_raw = (item.get("subject") or "").strip()
+            subject_raw = (_decode_display_value(item.get("subject")) or "").strip()
             subject = _apply_subject_alias(subject_raw, alias_map)
 
             if subject and subject.lower() not in {"generelt", "(uden angivelse af fag)"}:
                 markdown_parts.append(f"### {subject}")
 
-            content_text = (item.get("content_text") or "").strip()
+            content_text = (_decode_display_value(item.get("content_text")) or "").strip()
             if content_text:
                 markdown_parts.append(_format_general_content(content_text))
 
@@ -718,12 +832,12 @@ def _build_weekplan_markdown(
 
         if include_focus:
             for lesson_idx, lesson in enumerate(lesson_plans):
-                subject = _apply_subject_alias((lesson.get("subject") or "Generelt").strip(), alias_map)
+                subject = _apply_subject_alias((_decode_display_value(lesson.get("subject")) or "Generelt").strip(), alias_map)
                 if subject and subject.lower() not in {"generelt", "(uden angivelse af fag)"}:
                     day_parts.append(f"### {subject}")
 
                 if lesson.get("content_text"):
-                    day_parts.append(lesson["content_text"])
+                    day_parts.append(_decode_display_value(lesson["content_text"]) or "")
 
                 if lesson_idx < len(lesson_plans) - 1:
                     day_parts.append(SECTION_DIVIDER)
@@ -746,6 +860,7 @@ def _build_weekplan_markdown(
 
 
 def _plan_general_only(plan: dict[str, Any]) -> dict[str, Any]:
+    plan = _decode_weekplan(plan)
     items = [x for x in (plan.get("items") or []) if x.get("type") == "general"]
     return {
         "title": plan.get("title"),
@@ -758,6 +873,7 @@ def _plan_general_only(plan: dict[str, Any]) -> dict[str, Any]:
 
 
 def _plan_focus_only(plan: dict[str, Any]) -> dict[str, Any]:
+    plan = _decode_weekplan(plan)
     focus_days = []
     for day in plan.get("days", []) or []:
         lesson_plans = day.get("lesson_plans") or []
@@ -780,6 +896,7 @@ def _plan_focus_only(plan: dict[str, Any]) -> dict[str, Any]:
 
 
 def _plan_schedule_only(plan: dict[str, Any]) -> dict[str, Any]:
+    plan = _decode_weekplan(plan)
     schedule_days = []
     for day in plan.get("days", []) or []:
         schedule = day.get("schedule") or []
@@ -819,7 +936,7 @@ def _decorate_homework_items(
     decorated: list[dict[str, Any]] = []
 
     for item in items:
-        normalized = dict(item)
+        normalized = _decode_homework_item(dict(item))
 
         homework_id = build_homework_id(
             child_name=(normalized.get("barn") or ""),
@@ -845,8 +962,11 @@ async def async_setup_entry(
 ) -> None:
     coordinator: ForaldreIntraCoordinator = hass.data[DOMAIN][entry.entry_id]
     data = coordinator.data or {}
-    children = [c.get("name") for c in data.get("children", []) if c.get("name")]
-    selected_children: list[str] = entry.options.get(OPT_SELECTED_CHILDREN, children)
+    children = [_decode_display_value(c.get("name")) for c in data.get("children", []) if c.get("name")]
+    selected_children: list[str] = [
+        _decode_display_value(name)
+        for name in entry.options.get(OPT_SELECTED_CHILDREN, children)
+    ]
 
     entities: list[SensorEntity] = []
 
@@ -956,9 +1076,9 @@ class ForaeldreIntraChildHomeworkSensor(ForaeldreIntraBaseSensor):
     def __init__(self, hass: HomeAssistant, coordinator: ForaldreIntraCoordinator, entry: ConfigEntry, child_name: str) -> None:
         super().__init__(coordinator, entry)
         self._hass = hass
-        self._child = child_name
-        self._attr_name = f"ForældreIntra lektier ({child_name})"
-        self._attr_unique_id = f"{entry.entry_id}_homework_{slugify(child_name)}"
+        self._child = _decode_display_value(child_name) or ""
+        self._attr_name = f"ForældreIntra lektier ({self._child})"
+        self._attr_unique_id = f"{entry.entry_id}_homework_{slugify(self._child)}"
 
     @property
     def native_value(self) -> int:
@@ -998,19 +1118,25 @@ class ForaeldreIntraChildWeekplanSensor(ForaeldreIntraBaseSensor):
 
     def __init__(self, coordinator: ForaldreIntraCoordinator, entry: ConfigEntry, child_name: str) -> None:
         super().__init__(coordinator, entry)
-        self._child = child_name
-        self._attr_name = f"ForældreIntra ugeplan ({child_name})"
-        self._attr_unique_id = f"{entry.entry_id}_weekplan_{slugify(child_name)}"
+        self._child = _decode_display_value(child_name) or ""
+        self._attr_name = f"ForældreIntra ugeplan ({self._child})"
+        self._attr_unique_id = f"{entry.entry_id}_weekplan_{slugify(self._child)}"
 
     @property
     def native_value(self) -> str:
-        weeklyplans = (self.coordinator.data or {}).get("weeklyplans", {})
+        weeklyplans = {
+            _decode_display_value(name) or "": _decode_weekplan(plan or {})
+            for name, plan in ((self.coordinator.data or {}).get("weeklyplans", {}) or {}).items()
+        }
         plan = weeklyplans.get(self._child, {})
         return _week_short(plan.get("week")) or "ingen"
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        weeklyplans = (self.coordinator.data or {}).get("weeklyplans", {})
+        weeklyplans = {
+            _decode_display_value(name) or "": _decode_weekplan(plan or {})
+            for name, plan in ((self.coordinator.data or {}).get("weeklyplans", {}) or {}).items()
+        }
         plan = dict(weeklyplans.get(self._child, {}) or {})
 
         include_general = bool(
@@ -1059,7 +1185,7 @@ class ForaeldreIntraChildWeekplanSensor(ForaeldreIntraBaseSensor):
             "title": _build_display_title(plan),
             "week": _week_short(plan.get("week")),
             "url": plan.get("url"),
-            "class_or_group": plan.get("class_or_group"),
+            "class_or_group": _decode_display_value(plan.get("class_or_group")) or "",
             "items": filtered_items,
             "days": filtered_days,
         }
@@ -1087,19 +1213,25 @@ class ForaeldreIntraChildWeekplanGeneralSensor(ForaeldreIntraBaseSensor):
 
     def __init__(self, coordinator: ForaldreIntraCoordinator, entry: ConfigEntry, child_name: str) -> None:
         super().__init__(coordinator, entry)
-        self._child = child_name
-        self._attr_name = f"ForældreIntra ugeplan generelt ({child_name})"
-        self._attr_unique_id = f"{entry.entry_id}_weekplan_general_{slugify(child_name)}"
+        self._child = _decode_display_value(child_name) or ""
+        self._attr_name = f"ForældreIntra ugeplan generelt ({self._child})"
+        self._attr_unique_id = f"{entry.entry_id}_weekplan_general_{slugify(self._child)}"
 
     @property
     def native_value(self) -> str:
-        weeklyplans = (self.coordinator.data or {}).get("weeklyplans", {})
+        weeklyplans = {
+            _decode_display_value(name) or "": _decode_weekplan(plan or {})
+            for name, plan in ((self.coordinator.data or {}).get("weeklyplans", {}) or {}).items()
+        }
         plan = weeklyplans.get(self._child, {})
         return _week_short(plan.get("week")) or "ingen"
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        weeklyplans = (self.coordinator.data or {}).get("weeklyplans", {})
+        weeklyplans = {
+            _decode_display_value(name) or "": _decode_weekplan(plan or {})
+            for name, plan in ((self.coordinator.data or {}).get("weeklyplans", {}) or {}).items()
+        }
         raw_plan = dict(weeklyplans.get(self._child, {}) or {})
         plan = _plan_general_only(raw_plan)
 
@@ -1108,7 +1240,7 @@ class ForaeldreIntraChildWeekplanGeneralSensor(ForaeldreIntraBaseSensor):
             "title": _build_display_title(raw_plan),
             "week": _week_short(raw_plan.get("week")),
             "url": plan.get("url"),
-            "class_or_group": plan.get("class_or_group"),
+            "class_or_group": _decode_display_value(plan.get("class_or_group")) or "",
             "items": plan.get("items", []),
             "days": [],
         }
@@ -1136,19 +1268,25 @@ class ForaeldreIntraChildWeekplanFocusSensor(ForaeldreIntraBaseSensor):
 
     def __init__(self, coordinator: ForaldreIntraCoordinator, entry: ConfigEntry, child_name: str) -> None:
         super().__init__(coordinator, entry)
-        self._child = child_name
-        self._attr_name = f"ForældreIntra ugeplan fokus ({child_name})"
-        self._attr_unique_id = f"{entry.entry_id}_weekplan_focus_{slugify(child_name)}"
+        self._child = _decode_display_value(child_name) or ""
+        self._attr_name = f"ForældreIntra ugeplan fokus ({self._child})"
+        self._attr_unique_id = f"{entry.entry_id}_weekplan_focus_{slugify(self._child)}"
 
     @property
     def native_value(self) -> str:
-        weeklyplans = (self.coordinator.data or {}).get("weeklyplans", {})
+        weeklyplans = {
+            _decode_display_value(name) or "": _decode_weekplan(plan or {})
+            for name, plan in ((self.coordinator.data or {}).get("weeklyplans", {}) or {}).items()
+        }
         plan = weeklyplans.get(self._child, {})
         return _week_short(plan.get("week")) or "ingen"
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        weeklyplans = (self.coordinator.data or {}).get("weeklyplans", {})
+        weeklyplans = {
+            _decode_display_value(name) or "": _decode_weekplan(plan or {})
+            for name, plan in ((self.coordinator.data or {}).get("weeklyplans", {}) or {}).items()
+        }
         raw_plan = dict(weeklyplans.get(self._child, {}) or {})
         plan = _plan_focus_only(raw_plan)
 
@@ -1157,7 +1295,7 @@ class ForaeldreIntraChildWeekplanFocusSensor(ForaeldreIntraBaseSensor):
             "title": _build_display_title(raw_plan),
             "week": _week_short(raw_plan.get("week")),
             "url": plan.get("url"),
-            "class_or_group": plan.get("class_or_group"),
+            "class_or_group": _decode_display_value(plan.get("class_or_group")) or "",
             "items": [],
             "days": plan.get("days", []),
         }
@@ -1185,19 +1323,25 @@ class ForaeldreIntraChildWeekplanScheduleSensor(ForaeldreIntraBaseSensor):
 
     def __init__(self, coordinator: ForaldreIntraCoordinator, entry: ConfigEntry, child_name: str) -> None:
         super().__init__(coordinator, entry)
-        self._child = child_name
-        self._attr_name = f"ForældreIntra ugeplan skema ({child_name})"
-        self._attr_unique_id = f"{entry.entry_id}_weekplan_schedule_{slugify(child_name)}"
+        self._child = _decode_display_value(child_name) or ""
+        self._attr_name = f"ForældreIntra ugeplan skema ({self._child})"
+        self._attr_unique_id = f"{entry.entry_id}_weekplan_schedule_{slugify(self._child)}"
 
     @property
     def native_value(self) -> str:
-        weeklyplans = (self.coordinator.data or {}).get("weeklyplans", {})
+        weeklyplans = {
+            _decode_display_value(name) or "": _decode_weekplan(plan or {})
+            for name, plan in ((self.coordinator.data or {}).get("weeklyplans", {}) or {}).items()
+        }
         plan = weeklyplans.get(self._child, {})
         return _week_short(plan.get("week")) or "ingen"
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        weeklyplans = (self.coordinator.data or {}).get("weeklyplans", {})
+        weeklyplans = {
+            _decode_display_value(name) or "": _decode_weekplan(plan or {})
+            for name, plan in ((self.coordinator.data or {}).get("weeklyplans", {}) or {}).items()
+        }
         raw_plan = dict(weeklyplans.get(self._child, {}) or {})
         plan = _plan_schedule_only(raw_plan)
 
@@ -1206,7 +1350,7 @@ class ForaeldreIntraChildWeekplanScheduleSensor(ForaeldreIntraBaseSensor):
             "title": _build_display_title(raw_plan),
             "week": _week_short(raw_plan.get("week")),
             "url": plan.get("url"),
-            "class_or_group": plan.get("class_or_group"),
+            "class_or_group": _decode_display_value(plan.get("class_or_group")) or "",
             "items": [],
             "days": plan.get("days", []),
         }
