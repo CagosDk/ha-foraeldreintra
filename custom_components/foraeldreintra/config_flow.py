@@ -14,7 +14,6 @@ from .const import (
     CONF_USERNAME,
     DEFAULT_ADD_HOMEWORK_MARKDOWN,
     DEFAULT_ADD_WEEKPLAN_MARKDOWN,
-    DEFAULT_DISPLAY_PERIOD,
     DEFAULT_INCLUDE_WEEKPLAN_FOCUS,
     DEFAULT_INCLUDE_WEEKPLAN_GENERAL,
     DEFAULT_INCLUDE_WEEKPLAN_SCHEDULE,
@@ -29,7 +28,6 @@ from .const import (
     DOMAIN,
     OPT_ADD_HOMEWORK_MARKDOWN,
     OPT_ADD_WEEKPLAN_MARKDOWN,
-    OPT_DISPLAY_PERIOD,
     OPT_INCLUDE_WEEKPLAN_FOCUS,
     OPT_INCLUDE_WEEKPLAN_GENERAL,
     OPT_INCLUDE_WEEKPLAN_SCHEDULE,
@@ -215,23 +213,6 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     mode=selector.SelectSelectorMode.LIST,
                 )
             )
-
-        schema_dict[
-            vol.Required(
-                OPT_DISPLAY_PERIOD,
-                default=existing.get(OPT_DISPLAY_PERIOD, DEFAULT_DISPLAY_PERIOD),
-            )
-        ] = selector.SelectSelector(
-            selector.SelectSelectorConfig(
-                options=[
-                    {"value": "all", "label": "Historik + i dag + frem"},
-                    {"value": "today_and_future", "label": "Kun i dag + frem"},
-                    {"value": "future_only", "label": "Kun frem (fra i morgen)"},
-                ],
-                multiple=False,
-                mode=selector.SelectSelectorMode.DROPDOWN,
-            )
-        )
 
         schema_dict[
             vol.Required(

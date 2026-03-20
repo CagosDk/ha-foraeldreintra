@@ -1,0 +1,33 @@
+mark_homework_done:
+  name: Marker lektie som løst
+  description: Markerer en lektie som løst ud fra homework_id.
+  fields:
+    homework_id:
+      name: Homework ID
+      description: Det unikke ID for lektien.
+      required: true
+      selector:
+        text:
+    config_entry_id:
+      name: Config entry ID
+      description: Valgfrit. Bruges hvis du har mere end én Foraeldreintra-integration.
+      required: false
+      selector:
+        text:
+
+mark_homework_undone:
+  name: Marker lektie som ikke løst
+  description: Fjerner markeringen som løst for en lektie ud fra homework_id.
+  fields:
+    homework_id:
+      name: Homework ID
+      description: Det unikke ID for lektien.
+      required: true
+      selector:
+        text:
+    config_entry_id:
+      name: Config entry ID
+      description: Valgfrit. Bruges hvis du har mere end én Foraeldreintra-integration.
+      required: false
+      selector:
+        text:

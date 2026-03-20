@@ -9,9 +9,6 @@ PLATFORMS = ["sensor"]
 # Options
 OPT_SELECTED_CHILDREN = "selected_children"
 
-OPT_DISPLAY_PERIOD = "display_period"
-DEFAULT_DISPLAY_PERIOD = "today_and_future"
-
 # Lektier
 OPT_SHOW_HOMEWORK_SENSORS = "show_homework_sensors"
 DEFAULT_SHOW_HOMEWORK_SENSORS = True
@@ -58,4 +55,9 @@ OPT_WEEKPLAN_DERIVED_HOMEWORK_ENABLED = "weekplan_derived_homework_enabled"
 DEFAULT_WEEKPLAN_DERIVED_HOMEWORK_ENABLED = False
 
 OPT_WEEKPLAN_DERIVED_HOMEWORK_KEYWORDS = "weekplan_derived_homework_keywords"
-DEFAULT_WEEKPLAN_DERIVED_HOMEWORK_KEYWORDS = ["diktatord", "øveord", "ord til diktat"]
+DEFAULT_WEEKPLAN_DERIVED_HOMEWORK_KEYWORDS = []
+
+STORAGE_VERSION = 1
+STORAGE_KEY = f"{DOMAIN}_homework_status"
+
+DATA_HOMEWORK_STATUS_STORE = "homework_status_store"

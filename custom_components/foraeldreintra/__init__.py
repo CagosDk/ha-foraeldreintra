@@ -5,8 +5,15 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import slugify
 
-from .const import DOMAIN, PLATFORMS, OPT_SELECTED_CHILDREN
+from .const import (
+    DATA_HOMEWORK_STATUS_STORE,
+    DOMAIN,
+    OPT_SELECTED_CHILDREN,
+    PLATFORMS,
+)
 from .coordinator import ForaldreIntraCoordinator
+from .homework_status import HomeworkStatusStore
+from .services import async_register_services, async_unregister_services
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
@@ -20,6 +27,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = coordinator
+
+    hass.data[DOMAIN].setdefault(DATA_HOMEWORK_STATUS_STORE, {})
+    status_store = HomeworkStatusStore(hass)
+    await status_store.async_load()
+    hass.data[DOMAIN][DATA_HOMEWORK_STATUS_STORE][entry.entry_id] = status_store
+
+    await async_register_services(hass)
 
     async def _remove_unselected_entities(updated_entry: ConfigEntry) -> None:
         """Fjern entities fra entity registry som ikke længere er valgt."""
@@ -95,4 +109,13 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 pass
 
         hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
+
+        status_store_map = hass.data.get(DOMAIN, {}).get(DATA_HOMEWORK_STATUS_STORE, {})
+        if isinstance(status_store_map, dict):
+            status_store_map.pop(entry.entry_id, None)
+
+        remaining_entries = hass.config_entries.async_entries(DOMAIN)
+        if len(remaining_entries) <= 1:
+            await async_unregister_services(hass)
+
     return unload_ok
