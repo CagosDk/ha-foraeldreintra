@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from pathlib import Path
+
+from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
@@ -18,6 +21,18 @@ from .services import async_register_services, async_unregister_services
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Set up via YAML (ikke brugt)."""
+    static_path = Path(__file__).parent / "www"
+
+    await hass.http.async_register_static_paths(
+        [
+            StaticPathConfig(
+                url_path="/foraeldreintra-static",
+                path=str(static_path),
+                cache_headers=False,
+            )
+        ]
+    )
+
     return True
 
 
