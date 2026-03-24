@@ -85,11 +85,11 @@ Afhængigt af dit HACS-setup bliver resource-filerne måske tilføjet automatisk
 
 Hvis kortet ikke dukker op i Lovelace-editoren:
 
-1. Gå til **Indstillinger → Dashboards → Ressourcer**
+1. Gå til **Indstillinger → Betjeningspaneler → Ressourcer**
 2. Tilføj JavaScript-filerne
 ```text
-/local/foraeldreintra-homework-card.js
-/local/foraeldreintra-homework-card-editor.js
+/foraeldreintra-static/foraeldreintra-homework-card.js?v=1
+/foraeldreintra-static/foraeldreintra-homework-card-editor.js?v=1
 ```
 4. Vælg typen **JavaScript Module**
 5. Genindlæs dashboardet
