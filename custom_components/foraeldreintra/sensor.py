@@ -23,7 +23,6 @@ from .const import (
     DEFAULT_SHOW_WEEKPLAN_SENSORS,
     DEFAULT_SUBJECT_ALIASES,
     DEFAULT_WEEKPLAN_DERIVED_HOMEWORK_ENABLED,
-    DEFAULT_WEEKPLAN_DERIVED_HOMEWORK_KEYWORDS,
     DOMAIN,
     OPT_ADD_HOMEWORK_MARKDOWN,
     OPT_ADD_WEEKPLAN_MARKDOWN,
@@ -44,7 +43,6 @@ from .coordinator import ForaldreIntraCoordinator
 from .decoding import _decode_display_value, _decode_homework_item, _decode_weekplan
 from .formatting import (
     STANDARD_SUBJECT_ALIASES,
-    _apply_subject_alias,
     _build_display_title,
     _build_homework_markdown,
     _build_weekplan_markdown,
