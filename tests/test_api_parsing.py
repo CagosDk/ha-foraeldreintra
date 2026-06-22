@@ -176,6 +176,71 @@ class TestParseHomeworkNotes:
         assert result[0]["links"][0]["tekst"] == "Klik her"
 
 
+class TestParseHomeworkNotesLektiebogTable:
+    def test_table_rows_split_into_separate_subjects(self):
+        html = """
+        <ul class="sk-list">
+          <li>
+            <div class="sk-white-box"><b>Onsdag, 15. apr. 2026:</b></div>
+            <div class="sk-user-input">
+              <table>
+                <tr><th>FAG</th><th>LEKTIER</th></tr>
+                <tr><td>DANSK</td><td>Læs side 100-103 i Kom og Læs</td></tr>
+                <tr><td>MATEMATIK</td><td>Lav side 38 færdig</td></tr>
+                <tr><td>ENGELSK</td><td></td></tr>
+                <tr><td>IDRÆT</td><td></td></tr>
+              </table>
+            </div>
+          </li>
+        </ul>
+        """
+        result = _parse_homework_notes(html)
+
+        assert len(result) == 2
+        assert result[0]["dato"] == "Onsdag, 15. apr. 2026"
+        assert result[0]["fag"] == "Dansk"
+        assert "Læs side 100-103" in result[0]["tekst"]
+        assert result[1]["fag"] == "Matematik"
+        assert "Lav side 38 færdig" in result[1]["tekst"]
+
+    def test_empty_subject_rows_are_skipped(self):
+        html = """
+        <ul class="sk-list">
+          <li>
+            <div class="sk-white-box"><b>15. apr. 2026:</b></div>
+            <div class="sk-user-input">
+              <table>
+                <tr><th>FAG</th><th>LEKTIER</th></tr>
+                <tr><td>ENGELSK</td><td></td></tr>
+                <tr><td>MUSIK</td><td>   </td></tr>
+              </table>
+            </div>
+          </li>
+        </ul>
+        """
+        assert _parse_homework_notes(html) == []
+
+    def test_table_links_are_extracted(self):
+        html = """
+        <ul class="sk-list">
+          <li>
+            <div class="sk-white-box"><b>15. apr. 2026:</b></div>
+            <div class="sk-user-input">
+              <table>
+                <tr><th>FAG</th><th>LEKTIER</th></tr>
+                <tr><td>DANSK</td><td><a href="https://example.com">Se opgave</a></td></tr>
+              </table>
+            </div>
+          </li>
+        </ul>
+        """
+        result = _parse_homework_notes(html)
+        assert len(result) == 1
+        assert result[0]["fag"] == "Dansk"
+        assert result[0]["links"][0]["url"] == "https://example.com"
+        assert result[0]["links"][0]["tekst"] == "Se opgave"
+
+
 class TestExtractLatestWeekplanFromList:
     def test_returns_none_for_html_without_container(self):
         assert _extract_latest_weekplan_from_list("<html></html>") is None

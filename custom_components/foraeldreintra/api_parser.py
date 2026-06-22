@@ -209,22 +209,63 @@ def _parse_weekplan_page(
     }
 
 
+def _clean_text(txt: str) -> str:
+    return (txt or "").replace("\xa0", " ").strip()
+
+
+def _normalize_subject(s: str) -> str:
+    s = (s or "").strip().replace(":", "")
+    if not s:
+        return ""
+    return s.lower().capitalize()
+
+
+def _ensure_subject(s: str | None) -> str:
+    s2 = _normalize_subject(s or "")
+    return s2 if s2 else "Ukendt"
+
+
+def _parse_lektiebog_table_rows(table: Any, dato: str) -> list[dict[str, Any]]:
+    """Parser en 'Lektiebog'-tabel (FAG/LEKTIER-kolonner) til homework-items."""
+    items: list[dict[str, Any]] = []
+
+    for row in table.find_all("tr"):
+        cells = row.find_all(["td", "th"])
+        if len(cells) < 2:
+            continue
+
+        fag_cell, content_cell = cells[0], cells[1]
+        fag_text = _clean_text(fag_cell.get_text(" ", strip=True))
+
+        if fag_cell.name == "th" or fag_text.lower() in ("fag", "lektier"):
+            continue
+
+        links: list[dict[str, Any]] = []
+        for a in content_cell.find_all("a"):
+            t = _clean_text(a.get_text(strip=True)) or "link"
+            u = a.get("href")
+            links.append({"tekst": t, "url": u})
+            a.extract()
+
+        tekst = _clean_text(content_cell.get_text(" ", strip=True))
+        if not tekst and not links:
+            continue
+
+        items.append(
+            {
+                "dato": dato,
+                "fag": _ensure_subject(fag_text),
+                "tekst": tekst,
+                "links": links,
+            }
+        )
+
+    return items
+
+
 def _parse_homework_notes(html_text: str) -> list[dict[str, Any]]:
     soup = BeautifulSoup(html_text, "html.parser")
     result: list[dict[str, Any]] = []
-
-    def clean_text(txt: str) -> str:
-        return (txt or "").replace("\xa0", " ").strip()
-
-    def normalize_subject(s: str) -> str:
-        s = (s or "").strip().replace(":", "")
-        if not s:
-            return ""
-        return s.lower().capitalize()
-
-    def ensure_subject(s: str | None) -> str:
-        s2 = normalize_subject(s or "")
-        return s2 if s2 else "Ukendt"
 
     for li in soup.select("ul.sk-list > li"):
         dato_tag = li.select_one("div.sk-white-box > b")
@@ -234,6 +275,12 @@ def _parse_homework_notes(html_text: str) -> list[dict[str, Any]]:
             continue
 
         dato = dato_tag.get_text(strip=True).replace(":", "").strip()
+
+        table = content_div.find("table")
+        if table:
+            result.extend(_parse_lektiebog_table_rows(table, dato))
+            continue
+
         current_fag: str | None = None
         blocks: dict[str | None, dict[str, Any]] = {}
 
@@ -248,21 +295,21 @@ def _parse_homework_notes(html_text: str) -> list[dict[str, Any]]:
 
             strong = node.find("strong") if hasattr(node, "find") else None
             if strong:
-                fag_txt = normalize_subject(clean_text(strong.get_text(strip=True)))
+                fag_txt = _normalize_subject(_clean_text(strong.get_text(strip=True)))
                 if fag_txt:
                     current_fag = fag_txt
                     ensure_block(current_fag)
                 strong.extract()
 
             for a in node.find_all("a"):
-                t = clean_text(a.get_text(strip=True)) or "link"
+                t = _clean_text(a.get_text(strip=True)) or "link"
                 u = a.get("href")
                 ensure_block(current_fag)["links"].append(
                     {"tekst": t, "url": u}
                 )
                 a.extract()
 
-            txt = clean_text(node.get_text(" ", strip=True))
+            txt = _clean_text(node.get_text(" ", strip=True))
             if txt:
                 ensure_block(current_fag)["lines"].append(txt)
 
@@ -270,7 +317,7 @@ def _parse_homework_notes(html_text: str) -> list[dict[str, Any]]:
             lines = data.get("lines") or []
             links = data.get("links") or []
             tekst = "\n".join(
-                [clean_text(x) for x in lines if clean_text(x)]
+                [_clean_text(x) for x in lines if _clean_text(x)]
             ).strip()
 
             if not tekst and not links:
@@ -280,13 +327,13 @@ def _parse_homework_notes(html_text: str) -> list[dict[str, Any]]:
                 first_line = tekst.splitlines()[0].strip()
                 m = re.match(r"^([A-Za-zÆØÅæøå ]{2,30})\s*:\s*(.+)$", first_line)
                 if m:
-                    guessed_fag = normalize_subject(m.group(1).strip())
+                    guessed_fag = _normalize_subject(m.group(1).strip())
                     rest = m.group(2).strip()
                     fag = guessed_fag
                     remaining_lines = tekst.splitlines()[1:]
                     tekst = "\n".join([rest] + remaining_lines).strip()
 
-            fag_final = ensure_subject(str(fag) if fag is not None else None)
+            fag_final = _ensure_subject(str(fag) if fag is not None else None)
 
             result.append(
                 {
