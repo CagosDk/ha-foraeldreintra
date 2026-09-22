@@ -177,6 +177,45 @@ class TestParseHomeworkNotes:
 
 
 class TestParseHomeworkNotesLektiebogTable:
+    def test_text_around_homework_table_is_preserved(self):
+        html = """
+        <ul class="sk-list"><li>
+          <div class="sk-white-box"><b>15. apr. 2026:</b></div>
+          <div class="sk-user-input">
+            <p>Husk idrætstøj</p>
+            <table>
+              <tr><th>FAG</th><th>LEKTIER</th></tr>
+              <tr><td>DANSK</td><td>Læs side 42</td></tr>
+            </table>
+            <p><a href="https://example.com">Ugebrev</a></p>
+          </div>
+        </li></ul>
+        """
+        result = _parse_homework_notes(html)
+        assert len(result) == 2
+        assert result[0]["fag"] == "Dansk"
+        assert result[0]["tekst"] == "Læs side 42"
+        assert result[1]["tekst"] == "Husk idrætstøj"
+        assert result[1]["links"] == [
+            {"tekst": "Ugebrev", "url": "https://example.com"}
+        ]
+
+    def test_other_table_keeps_existing_text_parsing(self):
+        html = """
+        <ul class="sk-list"><li>
+          <div class="sk-white-box"><b>15. apr. 2026:</b></div>
+          <div class="sk-user-input">
+            <p>Husk turen</p>
+            <table><tr><th>Dag</th><th>Sted</th></tr>
+              <tr><td>Fredag</td><td>Skoven</td></tr></table>
+          </div>
+        </li></ul>
+        """
+        result = _parse_homework_notes(html)
+        assert len(result) == 1
+        assert "Husk turen" in result[0]["tekst"]
+        assert "Skoven" in result[0]["tekst"]
+
     def test_table_rows_split_into_separate_subjects(self):
         html = """
         <ul class="sk-list">
