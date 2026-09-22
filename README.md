@@ -7,7 +7,7 @@ En dansk Home Assistant-løsning til at hente og vise data fra **ForældreIntra 
 Projektet består af to dele:
 
 - **Integrationen** henter og eksponerer data som Home Assistant-entiteter
-- **Lovelace-kortet** viser lektierne i et læsbart og fleksibelt kort med custom editor
+- **Lovelace-kortene** viser lektier eller dagens skema og fokus med visuelle editorer
 
 Løsningen er lavet til danske brugere og danske skoledata.
 
@@ -49,6 +49,7 @@ Det medfølgende custom card gør det nemt at vise lektier direkte i dit dashboa
   - baggrundslag og gennemsigtighed
   - statusfarver
 - Custom editor i Lovelace UI
+- Separat dagskort med dagens skema, dagens fokus fra ugeplanen eller begge
 
 ---
 
@@ -160,6 +161,73 @@ child_aliases: {}
 subject_aliases: {}
 show_derived_items: true
 ```
+
+---
+
+## Dagsvisning: skema og fokus
+
+Kortet **ForældreIntra – I dag** viser ét barns data for dagens dato fra ugeplanssensorens `days`-attribut. Du kan vælge **kun skema**, **kun fokus** eller **begge** i den visuelle editor eller i YAML.
+
+### Installation af dagskortet
+
+Tilføj denne ekstra resource som **JavaScript Module** under **Indstillinger → Betjeningspaneler → Ressourcer**, og genindlæs dashboardet:
+
+```text
+/foraeldreintra-static/foraeldreintra-day-card.js?v=1
+```
+
+Editoren er inkluderet i samme fil. Lektiekortets eksisterende resources bruges fortsat til lektiekortet.
+
+### Skema og fokus sammen
+
+```yaml
+type: custom:foraeldreintra-day-card
+entity: sensor.foraeldreintra_ugeplan_anna
+title: Annas dag
+mode: both
+```
+
+### Kun dagens skema
+
+```yaml
+type: custom:foraeldreintra-day-card
+entity: sensor.foraeldreintra_ugeplan_anna
+title: Dagens skema
+mode: schedule
+```
+
+### Kun dagens fokus / ugeplan
+
+```yaml
+type: custom:foraeldreintra-day-card
+entity: sensor.foraeldreintra_ugeplan_anna
+title: Dagens fokus
+mode: focus
+```
+
+Erstat eksempel-entiteten med dit barns faktiske ugeplanssensor fra **Udviklerværktøjer → Tilstande**. Opret et kort pr. barn. Den samlede ugeplanssensor skal have både skema og fokus inkluderet i integrationens indstillinger for at vise begge dele. Du kan også bruge en særskilt skemasensor med `mode: schedule` eller en særskilt fokussensor med `mode: focus`.
+
+| Indstilling | Standard | Betydning |
+| --- | --- | --- |
+| `entity` | Påkrævet | Ugeplanssensor med `days` |
+| `title` | `I dag` | Kortets overskrift |
+| `mode` | `both` | `schedule`, `focus` eller `both` |
+
+Skemaet viser tid, fag og eventuel titel i kildens rækkefølge. Fokus viser dagens `lesson_plans` med fag og tekst; ugeplanens generelle tekster gældende for hele ugen vises ikke som dagens fokus. Linjeskift bevares, og indhold vises som tekst.
+
+**Dato og tomme data:** Dagens dato følger Home Assistants indstillede tidszone (ellers Europe/Copenhagen). Kortet opdateres ved nye sensordata og kontrollerer datoen hvert 30. sekund, mens det er åbent. Det viser kun en matchende dato, også ved årsskifte. En gammel ugeplan, en weekend uden indhold eller en dag uden match giver beskeden *Ingen ugeplan for i dag*. Mangler kun skema eller fokus, får den pågældende sektion sin egen tomme besked. Kortet henter ikke en anden ugeplan; det viser de data, integrationen allerede har hentet.
+
+Datoen læses fra `days[].date` i ISO-format, hvis den findes, ellers fra `formatted_date` (fx `15. sep.`) og uge/år i sensorens `url` (fx en sti med `38-2026`). En dato med et eksplicit år understøttes også. Uden et kendt år vises datoen ikke, så gamle data ikke bliver forvekslet med dagens.
+
+### Test
+
+Kør frontend-testene uden ekstra pakker med Node.js 22 eller nyere:
+
+```sh
+node --test tests/test_day_card.cjs
+```
+
+Testene dækker indholdsvalg, dato/tidszone, midnat, årsskifte, tomme data, tekst-escaping og editorens konfigurationsændringer. De køres også i GitHub Actions.
 
 ---
 
@@ -279,7 +347,7 @@ Denne release fokuserer på lektiekortet og stabilitet omkring:
 - statusindikatorer
 - styling og læsbarhed
 
-Ugeplan-kort er planlagt som et separat kort og ikke som en tilstand i samme kort.
+Dagsvisningen findes som et separat kort: `custom:foraeldreintra-day-card`. Det viser dagens skema og fokus fra ugeplanen; en samlet visning af hele ugen er endnu ikke implementeret.
 
 ---
 
