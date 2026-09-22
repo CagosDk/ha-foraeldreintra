@@ -225,6 +225,17 @@ def _ensure_subject(s: str | None) -> str:
     return s2 if s2 else "Ukendt"
 
 
+def _is_lektiebog_table(table: Any) -> bool:
+    header = table.find("tr")
+    if not header:
+        return False
+    cells = header.find_all(["th", "td"], recursive=False)
+    return len(cells) >= 2 and [
+        _clean_text(cell.get_text(" ", strip=True)).lower().rstrip(":")
+        for cell in cells[:2]
+    ] == ["fag", "lektier"]
+
+
 def _parse_lektiebog_table_rows(table: Any, dato: str) -> list[dict[str, Any]]:
     """Parser en 'Lektiebog'-tabel (FAG/LEKTIER-kolonner) til homework-items."""
     items: list[dict[str, Any]] = []
@@ -276,10 +287,10 @@ def _parse_homework_notes(html_text: str) -> list[dict[str, Any]]:
 
         dato = dato_tag.get_text(strip=True).replace(":", "").strip()
 
-        table = content_div.find("table")
-        if table:
-            result.extend(_parse_lektiebog_table_rows(table, dato))
-            continue
+        for table in content_div.find_all("table"):
+            if _is_lektiebog_table(table):
+                result.extend(_parse_lektiebog_table_rows(table, dato))
+                table.decompose()
 
         current_fag: str | None = None
         blocks: dict[str | None, dict[str, Any]] = {}
