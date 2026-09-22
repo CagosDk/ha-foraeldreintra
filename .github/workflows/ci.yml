@@ -42,6 +42,16 @@ jobs:
       - name: pytest
         run: python -m pytest tests/ -v
 
+  frontend:
+    name: Tests (Lovelace dagsvisning)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node --test tests/test_day_card.cjs
+
   hacs:
     name: HACS Validation
     runs-on: ubuntu-latest
