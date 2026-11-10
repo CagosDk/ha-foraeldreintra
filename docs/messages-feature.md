@@ -21,11 +21,13 @@
 The user confirmed these paths on their school's mobile site. The child ID and name are part of the parent path:
 
 - Conversation list: `GET /parent/{child_id}/{child_name}/messages/conversations`
+- Messages in a selected conversation: `GET /parent/{child_id}/{child_name}/messages/conversations/loadmessagesforselectedconversation`
+  - Query parameters observed: `threadId`, `takeFromRootMessageId`, `takeToMessageId`, `searchRequest`, and a cache-busting `_`.
 - Mark messages read: `POST /parent/{child_id}/{child_name}/messages/UpdateMessagesReadState`
 - Archive messages: `POST /parent/{child_id}/{child_name}/messages/batchArchiveMessages`
 - Delete messages: `POST /parent/{child_id}/{child_name}/messages/batchDeleteMessages`
 
-The delete action prompts for confirmation in the website. Confirm the exact request body and whether the prompt is only client-side before implementing it. Do not bypass a server-side confirmation token or required confirmation flow.
+Do not commit actual thread IDs, message IDs, names, timestamps, or message content from a user's account. The delete action prompts for confirmation in the website. Confirm the exact request body and whether the prompt is only client-side before implementing it. Do not bypass a server-side confirmation token or required confirmation flow.
 
 ## Actions
 
@@ -33,4 +35,4 @@ Expose explicit Home Assistant services for reply, mark read, archive, and delet
 
 ## Unknowns to resolve
 
-The authenticated conversation pages and action requests are not available in the public repository. Before implementing the parser and write actions, capture a redacted example of the conversation list, an individual conversation, and the network requests made by reply, mark-read, archive, and delete. Remove cookies, authorization headers, CSRF/session tokens, names, and message text. Keep request paths, methods, field names, and response structure intact. The school's mobile website URL can be used as a fallback open action; verify whether the Forældreintra app accepts a deep link before advertising it as app-open support.
+The authenticated conversation and message response bodies and action requests are not available in the public repository. Before implementing the parser and write actions, capture redacted response examples for the conversation list and an individual conversation, plus the network requests made by reply, mark-read, archive, and delete. Remove cookies, authorization headers, CSRF/session tokens, IDs, names, timestamps, and message text from samples. Keep field names, request methods, paths, and response structure intact. The school's mobile website URL can be used as a fallback open action; verify whether the Forældreintra app accepts a deep link before advertising it as app-open support.
