@@ -35,6 +35,7 @@ from .const import (
     OPT_NOTIFY_NEW_MESSAGES,
     DEFAULT_NOTIFY_NEW_MESSAGES,
     OPT_MESSAGE_NOTIFY_SERVICE,
+    OPT_TELEGRAM_TARGET,
     OPT_SHOW_HOMEWORK_SENSORS,
     OPT_SHOW_WEEKPLAN_FOCUS_SENSORS,
     OPT_SHOW_WEEKPLAN_GENERAL_SENSORS,
@@ -205,6 +206,9 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             cleaned[OPT_MESSAGE_NOTIFY_SERVICE] = str(
                 cleaned.get(OPT_MESSAGE_NOTIFY_SERVICE, "") or ""
             ).strip()
+            cleaned[OPT_TELEGRAM_TARGET] = str(
+                cleaned.get(OPT_TELEGRAM_TARGET, "") or ""
+            ).strip()
 
             return self.async_create_entry(title="", data=cleaned)
 
@@ -334,6 +338,12 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             vol.Optional(
                 OPT_MESSAGE_NOTIFY_SERVICE,
                 default=str(existing.get(OPT_MESSAGE_NOTIFY_SERVICE, "") or ""),
+            )
+        ] = str
+        schema_dict[
+            vol.Optional(
+                OPT_TELEGRAM_TARGET,
+                default=str(existing.get(OPT_TELEGRAM_TARGET, "") or ""),
             )
         ] = str
 

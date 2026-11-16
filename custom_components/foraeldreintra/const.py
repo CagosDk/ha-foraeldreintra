@@ -66,3 +66,4 @@ DATA_HOMEWORK_STATUS_STORE = "homework_status_store"
 OPT_NOTIFY_NEW_MESSAGES = "notify_new_messages"
 DEFAULT_NOTIFY_NEW_MESSAGES = False
 OPT_MESSAGE_NOTIFY_SERVICE = "message_notify_service"
+OPT_TELEGRAM_TARGET = "telegram_chat_id"

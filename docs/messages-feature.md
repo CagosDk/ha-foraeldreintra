@@ -4,7 +4,7 @@
 
 - Read message conversations and their messages for the configured, selected children.
 - Expose the latest messages and conversation metadata to Home Assistant.
-- Notify a configured Home Assistant notification service when a new message arrives. This supports Companion App and Telegram when they are configured as `notify.*` services.
+- Notify a configured Home Assistant notification service when a new message arrives. This supports Companion App through `notify.*` and Telegram through either `notify.*` or `telegram_bot.send_message`.
 - Phase 1: notify about new incoming messages through a configured Home Assistant notify service.
 - Later phase: add reply, mark-read, archive, and delete actions.
 - Let a notification open the conversation in the Forældreintra app when the app supports a usable deep link; otherwise open the mobile website.
@@ -13,7 +13,7 @@
 
 - Notify only for messages first observed after setup/baseline creation; do not send a burst of historical notifications at startup.
 - Persist seen message IDs so reloads and restarts do not send duplicates.
-- Let the user configure one existing Home Assistant notify service.
+- Let the user configure one Home Assistant notify service or the Telegram bot send-message action. Telegram requires a chat ID.
 - Include sender, subject, and plain-text message content truncated to 1000 characters.
 - Include an open-conversation URL/action when available.
 
@@ -22,7 +22,7 @@
 - Use the selected children from the integration options.
 - Poll the latest message in each conversation at the integration's existing scan interval.
 - Establish a per-child baseline on the first successful poll; do not notify for older messages after setup or restart.
-- Persist seen message IDs and send only unread messages through one configured `notify.*` service.
+- Persist seen message IDs and send only unread messages through the configured `notify.*` service or `telegram_bot.send_message` action.
 - Notifications link to the child's conversation list. The mobile website link may open the app if the device handles the domain; no app-specific deep link has been verified.
 
 ## Known message endpoints
@@ -58,4 +58,4 @@ The delete action prompts for confirmation in the website. Confirm the exact req
 
 ## Unknowns to resolve
 
-A public parser reference documents the JSON response fields used by the conversation list and selected-message endpoints. The POST actions and reply flow are deferred to a later phase. The school's mobile website URL can be used as the notification open action; an app-specific deep link has not been verified.
+A public parser reference documents the JSON response fields used by the conversation list and selected-message endpoints. The POST actions and reply flow are deferred to a later phase. Telegram delivery calls `telegram_bot.send_message` with `chat_id` values configured in the integration options; it does not poll for Telegram updates. The school's mobile website URL can be used as the notification open action; an app-specific deep link has not been verified.

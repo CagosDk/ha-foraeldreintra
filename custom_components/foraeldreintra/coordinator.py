@@ -21,6 +21,7 @@ from .const import (
     OPT_SELECTED_CHILDREN,
     OPT_NOTIFY_NEW_MESSAGES,
     OPT_MESSAGE_NOTIFY_SERVICE,
+    OPT_TELEGRAM_TARGET,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -173,10 +174,30 @@ class ForaldreIntraCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         service = str(
             self.entry.options.get(OPT_MESSAGE_NOTIFY_SERVICE, "") or ""
         ).strip()
-        if service.startswith("notify."):
-            service = service.split(".", 1)[1]
-        if not re.fullmatch(r"[a-z0-9_]+", service):
-            service = ""
+        telegram_service = service == "telegram_bot.send_message"
+        if telegram_service:
+            service_domain = "telegram_bot"
+            service_name = "send_message"
+            chat_id_values = [
+                value.strip()
+                for value in re.split(
+                    r"[,;\n]+",
+                    str(self.entry.options.get(OPT_TELEGRAM_TARGET, "") or ""),
+                )
+                if value.strip()
+            ]
+            chat_ids: list[str | int] = [
+                int(value) if re.fullmatch(r"-?\d+", value) else value
+                for value in chat_id_values
+            ]
+        else:
+            if service.startswith("notify."):
+                service = service.split(".", 1)[1]
+            if not re.fullmatch(r"[a-z0-9_]+", service):
+                service = ""
+            service_domain = "notify"
+            service_name = service
+            chat_ids = []
 
         seen_by_child: dict[str, list[str]] = {
             str(child_id): [
@@ -208,11 +229,17 @@ class ForaldreIntraCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if not bool(message.get("unread")) or not notify_enabled or not service:
                     seen.add(message_id)
                     continue
-
-                if not self.hass.services.has_service("notify", service):
+                if telegram_service and not chat_ids:
                     _LOGGER.warning(
-                        "ForældreIntra notification service notify.%s findes ikke",
-                        service,
+                        "Telegram er valgt til ForældreIntra, men chat-ID mangler"
+                    )
+                    continue
+
+                if not self.hass.services.has_service(service_domain, service_name):
+                    _LOGGER.warning(
+                        "ForældreIntra notification service %s.%s findes ikke",
+                        service_domain,
+                        service_name,
                     )
                     continue
 
@@ -232,20 +259,31 @@ class ForaldreIntraCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 url = str(message.get("url") or "")
 
                 try:
-                    await self.hass.services.async_call(
-                        "notify",
-                        service,
-                        {
+                    if telegram_service:
+                        telegram_message = f"{title}\n\n{notification}"
+                        if url:
+                            telegram_message += f"\n\n{url}"
+                        service_data = {
+                            "message": telegram_message,
+                            "chat_id": chat_ids,
+                        }
+                    else:
+                        service_data = {
                             "title": title,
                             "message": notification,
                             "data": {"url": url, "clickAction": url} if url else {},
-                        },
+                        }
+                    await self.hass.services.async_call(
+                        service_domain,
+                        service_name,
+                        service_data,
                         blocking=True,
                     )
                 except Exception:
                     _LOGGER.warning(
-                        "Kunne ikke sende ForældreIntra-notifikation via notify.%s",
-                        service,
+                        "Kunne ikke sende ForældreIntra-notifikation via %s.%s",
+                        service_domain,
+                        service_name,
                     )
                     continue
 
