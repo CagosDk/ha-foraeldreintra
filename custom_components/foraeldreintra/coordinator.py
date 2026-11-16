@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from datetime import timedelta
 import logging
+import re
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import ForaldreIntraClient, ForaldreIntraAuthError, ForaldreIntraError
@@ -16,6 +18,9 @@ from .const import (
     CONF_USERNAME,
     DEFAULT_SCAN_INTERVAL_MINUTES,
     DOMAIN,
+    OPT_SELECTED_CHILDREN,
+    OPT_NOTIFY_NEW_MESSAGES,
+    OPT_MESSAGE_NOTIFY_SERVICE,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -32,6 +37,12 @@ class ForaldreIntraCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             school_url=entry.data[CONF_SCHOOL_URL],
         )
         self._last_good_data: dict[str, Any] | None = None
+        self._message_notification_store = Store(
+            hass,
+            1,
+            f"{DOMAIN}_message_notifications_{entry.entry_id}",
+        )
+        self._message_notification_state: dict[str, Any] | None = None
 
         super().__init__(
             hass,
@@ -50,6 +61,11 @@ class ForaldreIntraCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             data = await self._fetch_children_homework_and_weekplans_with_retry()
 
             if self._is_valid_result(data):
+                if isinstance(data.get("messages"), list):
+                    await self._async_notify_new_messages(
+                        data["messages"],
+                        data.get("message_child_ids", []),
+                    )
                 self._last_good_data = data
                 return data
 
@@ -110,11 +126,140 @@ class ForaldreIntraCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         items = await self.client.get_homework_for_children(children) if children else []
         weeklyplans = await self.client.get_weekplans_for_children(children) if children else {}
 
+        selected_names = set(self.entry.options.get(OPT_SELECTED_CHILDREN, []))
+        message_children = [
+            child
+            for child in children
+            if not selected_names or child.name in selected_names
+        ]
+        messages: list[dict[str, Any]] | None = None
+        try:
+            messages = await self.client.get_messages_for_children(message_children)
+        except Exception:
+            # Message polling must not interrupt homework and weekly-plan updates.
+            _LOGGER.warning("Beskedpolling fejlede; de øvrige data opdateres videre.")
+
         return {
             "children": [{"id": c.id, "name": c.name} for c in children],
             "items": items,
             "weeklyplans": weeklyplans,
+            "messages": messages,
+            "message_child_ids": [child.id for child in message_children],
         }
+
+    async def _async_notify_new_messages(
+        self,
+        messages: list[dict[str, Any]],
+        child_ids: list[str],
+    ) -> None:
+        """Notify once for newly observed unread messages and persist their IDs."""
+        if self._message_notification_state is None:
+            stored = await self._message_notification_store.async_load()
+            self._message_notification_state = stored if isinstance(stored, dict) else {}
+
+        state = self._message_notification_state
+        initialized = set(str(value) for value in state.get("initialized_children", []))
+        stored_seen = state.get("seen_by_child", {})
+        if not isinstance(stored_seen, dict):
+            stored_seen = {}
+
+        current_by_child: dict[str, list[dict[str, Any]]] = {}
+        for message in messages:
+            child_id = str(message.get("child_id") or "")
+            if child_id:
+                current_by_child.setdefault(child_id, []).append(message)
+
+        notify_enabled = bool(self.entry.options.get(OPT_NOTIFY_NEW_MESSAGES, False))
+        service = str(
+            self.entry.options.get(OPT_MESSAGE_NOTIFY_SERVICE, "") or ""
+        ).strip()
+        if service.startswith("notify."):
+            service = service.split(".", 1)[1]
+        if not re.fullmatch(r"[a-z0-9_]+", service):
+            service = ""
+
+        seen_by_child: dict[str, list[str]] = {
+            str(child_id): [
+                str(message_id)
+                for message_id in message_ids
+                if message_id is not None
+            ][-1000:]
+            for child_id, message_ids in stored_seen.items()
+            if isinstance(message_ids, list)
+        }
+
+        for child_value in child_ids:
+            child_id = str(child_value)
+            seen = set(seen_by_child.get(child_id, []))
+            child_messages = current_by_child.get(child_id, [])
+
+            # First successful poll establishes a baseline and avoids old-message bursts.
+            if child_id not in initialized:
+                seen.update(str(message.get("id")) for message in child_messages)
+                initialized.add(child_id)
+                seen_by_child[child_id] = list(seen)[-1000:]
+                continue
+
+            for message in child_messages:
+                message_id = str(message.get("id") or "")
+                if not message_id or message_id in seen:
+                    continue
+
+                if not bool(message.get("unread")) or not notify_enabled or not service:
+                    seen.add(message_id)
+                    continue
+
+                if not self.hass.services.has_service("notify", service):
+                    _LOGGER.warning(
+                        "ForældreIntra notification service notify.%s findes ikke",
+                        service,
+                    )
+                    continue
+
+                sender = str(message.get("sender") or "").strip()
+                body = str(message.get("message") or "").strip()
+                if len(body) > 1000:
+                    body = body[:997] + "..."
+                title = (
+                    f"ForældreIntra · {message.get('child', '')} · "
+                    f"{message.get('subject', 'Ny besked')}"
+                )
+                notification = (
+                    f"{sender}: {body}"
+                    if sender and body
+                    else (body or sender or "Du har modtaget en ny besked.")
+                )
+                url = str(message.get("url") or "")
+
+                try:
+                    await self.hass.services.async_call(
+                        "notify",
+                        service,
+                        {
+                            "title": title,
+                            "message": notification,
+                            "data": {"url": url, "clickAction": url} if url else {},
+                        },
+                        blocking=True,
+                    )
+                except Exception:
+                    _LOGGER.warning(
+                        "Kunne ikke sende ForældreIntra-notifikation via notify.%s",
+                        service,
+                    )
+                    continue
+
+                seen.add(message_id)
+
+            seen_by_child[child_id] = list(seen)[-1000:]
+
+        self._message_notification_state = {
+            "initialized_children": sorted(initialized),
+            "seen_by_child": seen_by_child,
+        }
+        await self._message_notification_store.async_save(
+            self._message_notification_state
+        )
 
     def _is_valid_result(self, data: dict[str, Any] | None) -> bool:
         if not data or not isinstance(data, dict):
@@ -130,7 +275,7 @@ class ForaldreIntraCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         # Hvis der er børn men både ugeplaner og lektier er helt tomme,
         # er det ofte tegn på udløbet session / fejlsvar snarere end reel "ingen data".
-        if not weeklyplans and not items:
+        if not weeklyplans and not items and data.get("messages") is None:
             return False
 
         return True

@@ -4,17 +4,26 @@
 
 - Read message conversations and their messages for the configured, selected children.
 - Expose the latest messages and conversation metadata to Home Assistant.
-- Notify a configured Home Assistant notification service when a new message arrives. This supports Companion App and Telegram through their existing `notify.*` services.
-- Provide Home Assistant actions to reply, mark a conversation as read, archive, and delete.
+- Notify a configured Home Assistant notification service when a new message arrives. This supports Companion App and Telegram when they are configured as `notify.*` services.
+- Phase 1: notify about new incoming messages through a configured Home Assistant notify service.
+- Later phase: add reply, mark-read, archive, and delete actions.
 - Let a notification open the conversation in the Forældreintra app when the app supports a usable deep link; otherwise open the mobile website.
 
 ## Notification behavior
 
 - Notify only for messages first observed after setup/baseline creation; do not send a burst of historical notifications at startup.
 - Persist seen message IDs so reloads and restarts do not send duplicates.
-- Let the user configure one or more existing Home Assistant notify services.
-- Keep notification text concise and avoid exposing message bodies unless the user opts in.
+- Let the user configure one existing Home Assistant notify service.
+- Include sender, subject, and plain-text message content truncated to 1000 characters.
 - Include an open-conversation URL/action when available.
+
+## Phase 1 behavior
+
+- Use the selected children from the integration options.
+- Poll the latest message in each conversation at the integration's existing scan interval.
+- Establish a per-child baseline on the first successful poll; do not notify for older messages after setup or restart.
+- Persist seen message IDs and send only unread messages through one configured `notify.*` service.
+- Notifications link to the child's conversation list. The mobile website link may open the app if the device handles the domain; no app-specific deep link has been verified.
 
 ## Known message endpoints
 
@@ -47,12 +56,6 @@ The user confirmed these paths on their school's mobile site. The child ID and n
 
 The delete action prompts for confirmation in the website. Confirm the exact request body and whether the prompt is only client-side before implementing it. Do not bypass a server-side confirmation token or required confirmation flow.
 
-## Actions
-
-Expose explicit Home Assistant services for reply, mark read, archive, and delete. Reply accepts a conversation/message ID and text. Other actions accept the ID shape required by the actual site payload. Sending a reply, deleting, archiving, and marking read must happen only after an explicit user action; do not trigger these as a side effect of polling or notifications. Treat deletion as a deliberate action and do not make it an automatic default.
-
-Confirm request methods, URLs, form tokens, payloads, and response handling from the authenticated site's network requests before implementing writes. Escape user-supplied text before placing it in an HTML message body. Never infer a write payload from a read endpoint.
-
 ## Unknowns to resolve
 
-The authenticated conversation and message response bodies and action requests are not available in the public repository. Before implementing the parser and write actions, capture redacted response examples for the conversation list and an individual conversation, plus the network requests made by mark-read, archive, and delete. Remove cookies, authorization headers, CSRF/session tokens, IDs, names, timestamps, recipients, and message text from samples. Keep field names, request methods, paths, and response structure intact. The school's mobile website URL can be used as a fallback open action; verify whether the Forældreintra app accepts a deep link before advertising it as app-open support.
+A public parser reference documents the JSON response fields used by the conversation list and selected-message endpoints. The POST actions and reply flow are deferred to a later phase. The school's mobile website URL can be used as the notification open action; an app-specific deep link has not been verified.

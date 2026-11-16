@@ -61,3 +61,8 @@ STORAGE_VERSION = 1
 STORAGE_KEY = f"{DOMAIN}_homework_status"
 
 DATA_HOMEWORK_STATUS_STORE = "homework_status_store"
+
+# Message notifications
+OPT_NOTIFY_NEW_MESSAGES = "notify_new_messages"
+DEFAULT_NOTIFY_NEW_MESSAGES = False
+OPT_MESSAGE_NOTIFY_SERVICE = "message_notify_service"

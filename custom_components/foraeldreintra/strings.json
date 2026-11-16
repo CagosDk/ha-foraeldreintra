@@ -40,7 +40,9 @@
           "add_weekplan_markdown": "Add markdown to weekly plan",
           "subject_aliases": "Subject aliases (e.g. BOOS=Booster, SVØM=Svømning, MAS=)",
           "weekplan_derived_homework_enabled": "Add derived homework from weekly plan",
-          "weekplan_derived_homework_keywords": "Weekly plan keywords for derived homework (e.g. diktatord, øveord)"
+          "weekplan_derived_homework_keywords": "Weekly plan keywords for derived homework (e.g. diktatord, øveord)",
+          "notify_new_messages": "Notify about new messages",
+          "message_notify_service": "Notification service (e.g. notify.mobile_app_phone or notify.telegram)"
         }
       }
     }

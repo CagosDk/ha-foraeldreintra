@@ -32,6 +32,9 @@ from .const import (
     OPT_INCLUDE_WEEKPLAN_GENERAL,
     OPT_INCLUDE_WEEKPLAN_SCHEDULE,
     OPT_SELECTED_CHILDREN,
+    OPT_NOTIFY_NEW_MESSAGES,
+    DEFAULT_NOTIFY_NEW_MESSAGES,
+    OPT_MESSAGE_NOTIFY_SERVICE,
     OPT_SHOW_HOMEWORK_SENSORS,
     OPT_SHOW_WEEKPLAN_FOCUS_SENSORS,
     OPT_SHOW_WEEKPLAN_GENERAL_SENSORS,
@@ -196,6 +199,13 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 cleaned.get(OPT_SUBJECT_ALIASES, DEFAULT_SUBJECT_ALIASES) or ""
             ).strip()
 
+            cleaned[OPT_NOTIFY_NEW_MESSAGES] = bool(
+                cleaned.get(OPT_NOTIFY_NEW_MESSAGES, DEFAULT_NOTIFY_NEW_MESSAGES)
+            )
+            cleaned[OPT_MESSAGE_NOTIFY_SERVICE] = str(
+                cleaned.get(OPT_MESSAGE_NOTIFY_SERVICE, "") or ""
+            ).strip()
+
             return self.async_create_entry(title="", data=cleaned)
 
         schema_dict: dict = {}
@@ -311,6 +321,19 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             vol.Optional(
                 OPT_SUBJECT_ALIASES,
                 default=str(existing.get(OPT_SUBJECT_ALIASES, DEFAULT_SUBJECT_ALIASES) or ""),
+            )
+        ] = str
+
+        schema_dict[
+            vol.Required(
+                OPT_NOTIFY_NEW_MESSAGES,
+                default=existing.get(OPT_NOTIFY_NEW_MESSAGES, DEFAULT_NOTIFY_NEW_MESSAGES),
+            )
+        ] = bool
+        schema_dict[
+            vol.Optional(
+                OPT_MESSAGE_NOTIFY_SERVICE,
+                default=str(existing.get(OPT_MESSAGE_NOTIFY_SERVICE, "") or ""),
             )
         ] = str
 

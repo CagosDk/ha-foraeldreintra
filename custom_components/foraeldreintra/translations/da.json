@@ -40,7 +40,9 @@
           "add_weekplan_markdown": "Tilføj markdown til ugeplan",
           "subject_aliases": "Fag-oversættelser (fx BOOS=Booster, SVØM=Svømning, MAS=)",
           "weekplan_derived_homework_enabled": "Tilføj afledte lektier fra ugeplan",
-          "weekplan_derived_homework_keywords": "Nøgleord til afledte lektier fra ugeplan (fx diktatord, øveord)"
+          "weekplan_derived_homework_keywords": "Nøgleord til afledte lektier fra ugeplan (fx diktatord, øveord)",
+          "notify_new_messages": "Send notifikation ved nye beskeder",
+          "message_notify_service": "Notifikationstjeneste (fx notify.mobile_app_telefon eller notify.telegram)"
         }
       }
     }

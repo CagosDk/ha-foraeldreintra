@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import quote, urlencode, urljoin, urlparse
 
 from aiohttp import ClientSession
 from bs4 import BeautifulSoup
@@ -164,6 +166,158 @@ class ForaldreIntraClient:
                     children.append(Child(id=child_id, name=child_name))
 
         return children
+
+    async def get_messages_for_children(
+        self,
+        children: list[Child],
+    ) -> list[dict[str, Any]]:
+        """Fetch the latest message for every conversation belonging to selected children."""
+        messages: list[dict[str, Any]] = []
+
+        for child in children:
+            child_path = (
+                f"/parent/{quote(child.id, safe='')}/{quote(child.name, safe='')}"
+            )
+            child_url = f"{self._base_url}{child_path}"
+            conversations_url = f"{child_url}/messages/conversations"
+            page_html = await self._get_text(conversations_url)
+            page = BeautifulSoup(page_html, "html.parser")
+            settings = page.select_one(
+                "[data-clientlogic-settings-messageconversationswitharchivefunctionality]"
+            )
+            if settings is None:
+                raise ForaldreIntraError(
+                    "Samtalesiden indeholder ikke genkendelige beskeddata"
+                )
+
+            raw_settings = settings.get(
+                "data-clientlogic-settings-messageconversationswitharchivefunctionality"
+            )
+            try:
+                config = json.loads(str(raw_settings))
+            except (TypeError, json.JSONDecodeError) as err:
+                raise ForaldreIntraError(
+                    "Beskedindstillingerne kunne ikke læses"
+                ) from err
+
+            conversations = config.get("Conversations")
+            if not isinstance(conversations, list):
+                raise ForaldreIntraError(
+                    "Samtalelisten har et ukendt format"
+                )
+
+            provider = config.get("DataProviderSettings") or {}
+            detail_endpoint = provider.get(
+                "LoadMessagesForSelectedConversationUrl"
+            ) or f"{child_path}/messages/conversations/loadmessagesforselectedconversation"
+            detail_url = urljoin(f"{self._base_url}/", str(detail_endpoint).lstrip("/"))
+            base_origin = urlparse(self._base_url)
+            target_origin = urlparse(detail_url)
+            if (
+                target_origin.scheme != base_origin.scheme
+                or target_origin.netloc != base_origin.netloc
+                or not target_origin.path.startswith(child_path + "/")
+            ):
+                raise ForaldreIntraError(
+                    "Beskedendpointet peger uden for den valgte skole eller elev"
+                )
+
+            for conversation in conversations:
+                if not isinstance(conversation, dict):
+                    continue
+                latest_id = conversation.get("LatestMessageId")
+                if latest_id is None:
+                    continue
+                thread_id = str(conversation.get("ThreadId") or "")
+                if thread_id:
+                    params = {
+                        "threadId": thread_id,
+                        "takeFromRootMessageId": str(latest_id),
+                        "takeToMessageId": "0",
+                        "searchRequest": "",
+                    }
+                    request_url = f"{detail_url}?{urlencode(params)}"
+                else:
+                    request_url = (
+                        f"{child_url}/messages/conversations/getmessageforthreadlessconversation?"
+                        f"{urlencode({'messageId': str(latest_id)})}"
+                    )
+
+                response_text = await self._get_text(request_url)
+                try:
+                    response_data = json.loads(response_text)
+                except json.JSONDecodeError as err:
+                    raise ForaldreIntraError(
+                        "Beskedindholdet returnerede ikke gyldig JSON"
+                    ) from err
+
+                if isinstance(response_data, list):
+                    candidates = response_data
+                elif isinstance(response_data, dict):
+                    candidates = [response_data]
+                else:
+                    raise ForaldreIntraError(
+                        "Beskedindholdet har et ukendt format"
+                    )
+
+                latest_message = next(
+                    (
+                        item
+                        for item in candidates
+                        if isinstance(item, dict)
+                        and str(item.get("Id")) == str(latest_id)
+                    ),
+                    None,
+                )
+                if latest_message is None:
+                    valid_candidates = [
+                        item for item in candidates
+                        if isinstance(item, dict) and item.get("Id") is not None
+                    ]
+                    if valid_candidates:
+                        latest_message = max(
+                            valid_candidates,
+                            key=lambda item: int(item.get("Id", 0))
+                            if str(item.get("Id", "")).isdigit()
+                            else 0,
+                        )
+                if latest_message is None:
+                    continue
+                if not isinstance(latest_message.get("BaseText"), str):
+                    raise ForaldreIntraError(
+                        "Beskedindholdet mangler meddelelsestekst"
+                    )
+
+                body = BeautifulSoup(
+                    str(latest_message.get("BaseText") or ""),
+                    "html.parser",
+                )
+                for tag in body(["script", "style"]):
+                    tag.decompose()
+                messages.append(
+                    {
+                        "id": str(latest_message.get("Id")),
+                        "thread_id": thread_id or str(latest_id),
+                        "child_id": child.id,
+                        "child": child.name,
+                        "subject": str(
+                            latest_message.get("Subject")
+                            or conversation.get("Subject")
+                            or "Ny besked"
+                        ),
+                        "sender": str(latest_message.get("SenderName") or ""),
+                        "sent_at": str(
+                            latest_message.get("SentReceivedDateText") or ""
+                        ),
+                        "message": body.get_text(" ", strip=True),
+                        "unread": bool(
+                            latest_message.get("ShowUnreadIndication", False)
+                        ),
+                        "url": conversations_url,
+                    }
+                )
+
+        return messages
 
     async def get_homework(self) -> list[dict[str, Any]]:
         """Henter lektier for alle børn."""
