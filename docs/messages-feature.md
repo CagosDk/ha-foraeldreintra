@@ -6,6 +6,7 @@
 - Expose the latest messages and conversation metadata to Home Assistant.
 - Notify a configured Home Assistant notification service when a new message arrives. This supports Companion App through `notify.*` and Telegram through either `notify.*` or `telegram_bot.send_message`.
 - Phase 1: notify about new incoming messages through a configured Home Assistant notify service.
+- The options menu includes a test-notification action so the configured target can be checked immediately.
 - Later phase: add reply, mark-read, archive, and delete actions.
 - Let a notification open the conversation in the Forældreintra app when the app supports a usable deep link; otherwise open the mobile website.
 
@@ -13,7 +14,7 @@
 
 - Notify only for messages first observed after setup/baseline creation; do not send a burst of historical notifications at startup.
 - Persist seen message IDs so reloads and restarts do not send duplicates.
-- Let the user configure one Home Assistant notify service or the Telegram bot send-message action. Telegram requires a chat ID.
+- Let the user configure one Home Assistant notify service or the Telegram bot send-message action. Telegram requires a chat ID. The options menu provides a test notification that calls the selected service once.
 - Include sender, subject, and plain-text message content truncated to 1000 characters.
 - Include an open-conversation URL/action when available.
 

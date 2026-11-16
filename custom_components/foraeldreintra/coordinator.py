@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from datetime import timedelta
 import logging
-import re
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -12,6 +11,7 @@ from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import ForaldreIntraClient, ForaldreIntraAuthError, ForaldreIntraError
+from .notifications import async_send_notification, NotificationDeliveryError
 from .const import (
     CONF_PASSWORD,
     CONF_SCHOOL_URL,
@@ -174,30 +174,9 @@ class ForaldreIntraCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         service = str(
             self.entry.options.get(OPT_MESSAGE_NOTIFY_SERVICE, "") or ""
         ).strip()
-        telegram_service = service == "telegram_bot.send_message"
-        if telegram_service:
-            service_domain = "telegram_bot"
-            service_name = "send_message"
-            chat_id_values = [
-                value.strip()
-                for value in re.split(
-                    r"[,;\n]+",
-                    str(self.entry.options.get(OPT_TELEGRAM_TARGET, "") or ""),
-                )
-                if value.strip()
-            ]
-            chat_ids: list[str | int] = [
-                int(value) if re.fullmatch(r"-?\d+", value) else value
-                for value in chat_id_values
-            ]
-        else:
-            if service.startswith("notify."):
-                service = service.split(".", 1)[1]
-            if not re.fullmatch(r"[a-z0-9_]+", service):
-                service = ""
-            service_domain = "notify"
-            service_name = service
-            chat_ids = []
+        telegram_chat_ids = str(
+            self.entry.options.get(OPT_TELEGRAM_TARGET, "") or ""
+        ).strip()
 
         seen_by_child: dict[str, list[str]] = {
             str(child_id): [
@@ -228,6 +207,42 @@ class ForaldreIntraCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
                 if not bool(message.get("unread")) or not notify_enabled or not service:
                     seen.add(message_id)
+                    continue
+
+                sender = str(message.get("sender") or "").strip()
+                body = str(message.get("message") or "").strip()
+                if len(body) > 1000:
+                    body = body[:997] + "..."
+                title = (
+                    f"ForældreIntra · {message.get('child', '')} · "
+                    f"{message.get('subject', 'Ny besked')}"
+                )
+                notification = (
+                    f"{sender}: {body}"
+                    if sender and body
+                    else (body or sender or "Du har modtaget en ny besked.")
+                )
+
+                try:
+                    await async_send_notification(
+                        self.hass,
+                        service,
+                        title,
+                        notification,
+                        str(message.get("url") or ""),
+                        telegram_chat_ids,
+                    )
+                except NotificationDeliveryError:
+                    _LOGGER.warning(
+                        "ForældreIntra notification could not be sent via %s",
+                        service,
+                    )
+                    continue
+
+                seen.add(message_id)
+
+            seen_by_child[child_id] = list(seen)[-1000:]
+
                     continue
                 if telegram_service and not chat_ids:
                     _LOGGER.warning(

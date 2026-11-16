@@ -24,7 +24,15 @@
     "step": {
       "init": {
         "title": "Options",
-        "description": "Choose children and what should be exposed.",
+        "description": "Choose configuration or send a test notification.",
+        "menu_options": {
+          "configure": "Configure",
+          "test_notification": "Test notification"
+        }
+      },
+      "configure": {
+        "title": "Options",
+        "description": "Choose children, notification target, and what should be exposed.",
         "data": {
           "selected_children": "Children",
           "display_period": "Display period",
@@ -46,6 +54,10 @@
           "telegram_chat_id": "Telegram chat ID(s), required for telegram_bot.send_message"
         }
       }
+    },
+    "abort": {
+      "test_notification_sent": "Test notification sent.",
+      "test_notification_failed": "Could not send the test notification. Check the service and Telegram chat ID."
     }
   }
 }

@@ -8,6 +8,7 @@ from homeassistant.helpers import selector
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import ForaldreIntraAuthError, ForaldreIntraClient, ForaldreIntraError
+from .notifications import async_send_notification, NotificationDeliveryError
 from .const import (
     CONF_PASSWORD,
     CONF_SCHOOL_URL,
@@ -111,6 +112,35 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         self._children: list[str] = []
 
     async def async_step_init(self, user_input: dict | None = None) -> FlowResult:
+        """Show the options menu."""
+        return self.async_show_menu(
+            step_id="init",
+            menu_options=["configure", "test_notification"],
+        )
+
+    async def async_step_test_notification(
+        self,
+        user_input: dict | None = None,
+    ) -> FlowResult:
+        """Send one test message through the saved notification settings."""
+        service = str(
+            self.entry.options.get(OPT_MESSAGE_NOTIFY_SERVICE, "") or ""
+        ).strip()
+        try:
+            await async_send_notification(
+                self.hass,
+                service,
+                "ForældreIntra · test",
+                "Testnotifikation. Hvis du kan se denne, fungerer opsætningen.",
+                telegram_chat_ids=str(
+                    self.entry.options.get(OPT_TELEGRAM_TARGET, "") or ""
+                ),
+            )
+        except NotificationDeliveryError:
+            return self.async_abort(reason="test_notification_failed")
+        return self.async_abort(reason="test_notification_sent")
+
+    async def async_step_configure(self, user_input: dict | None = None) -> FlowResult:
         try:
             self._children = await self._fetch_children_names()
         except Exception:
@@ -348,7 +378,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         ] = str
 
         return self.async_show_form(
-            step_id="init",
+            step_id="configure",
             data_schema=vol.Schema(schema_dict),
             errors={},
         )

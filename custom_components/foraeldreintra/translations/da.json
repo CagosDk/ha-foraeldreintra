@@ -24,7 +24,15 @@
     "step": {
       "init": {
         "title": "Indstillinger",
-        "description": "Vælg hvilke børn der vises samt hvad der skal udstilles.",
+        "description": "Vælg indstillinger eller send en testnotifikation.",
+        "menu_options": {
+          "configure": "Konfigurer",
+          "test_notification": "Test notifikation"
+        }
+      },
+      "configure": {
+        "title": "Indstillinger",
+        "description": "Vælg børn, notifikationsmål og hvad integrationen skal vise.",
         "data": {
           "selected_children": "Børn",
           "display_period": "Visningsperiode",
@@ -46,6 +54,10 @@
           "telegram_chat_id": "Telegram chat-ID(er), kræves til telegram_bot.send_message"
         }
       }
+    },
+    "abort": {
+      "test_notification_sent": "Testnotifikation sendt.",
+      "test_notification_failed": "Kunne ikke sende testnotifikationen. Tjek tjenesten og Telegram-chat-ID'et."
     }
   }
 }
