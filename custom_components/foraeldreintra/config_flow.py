@@ -37,8 +37,10 @@ from .const import (
     OPT_SELECTED_CHILDREN,
     OPT_NOTIFY_NEW_MESSAGES,
     DEFAULT_NOTIFY_NEW_MESSAGES,
+    DEFAULT_SCAN_INTERVAL_MINUTES,
     OPT_MESSAGE_NOTIFY_SERVICE,
     OPT_TELEGRAM_TARGET,
+    OPT_SCAN_INTERVAL_MINUTES,
     OPT_SHOW_HOMEWORK_SENSORS,
     OPT_SHOW_WEEKPLAN_FOCUS_SENSORS,
     OPT_SHOW_WEEKPLAN_GENERAL_SENSORS,
@@ -236,6 +238,9 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 cleaned.get(OPT_SUBJECT_ALIASES, DEFAULT_SUBJECT_ALIASES) or ""
             ).strip()
 
+            cleaned[OPT_SCAN_INTERVAL_MINUTES] = int(
+                cleaned.get(OPT_SCAN_INTERVAL_MINUTES, DEFAULT_SCAN_INTERVAL_MINUTES)
+            )
             cleaned[OPT_NOTIFY_NEW_MESSAGES] = bool(
                 cleaned.get(OPT_NOTIFY_NEW_MESSAGES, DEFAULT_NOTIFY_NEW_MESSAGES)
             )
@@ -363,6 +368,23 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 default=str(existing.get(OPT_SUBJECT_ALIASES, DEFAULT_SUBJECT_ALIASES) or ""),
             )
         ] = str
+
+        schema_dict[
+            vol.Required(
+                OPT_SCAN_INTERVAL_MINUTES,
+                default=existing.get(
+                    OPT_SCAN_INTERVAL_MINUTES, DEFAULT_SCAN_INTERVAL_MINUTES
+                ),
+            )
+        ] = selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=1,
+                max=60,
+                step=1,
+                mode=selector.NumberSelectorMode.BOX,
+                unit_of_measurement="min",
+            )
+        )
 
         schema_dict[
             vol.Required(

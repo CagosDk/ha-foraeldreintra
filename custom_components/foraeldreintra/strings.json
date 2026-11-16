@@ -51,7 +51,8 @@
           "weekplan_derived_homework_keywords": "Weekly plan keywords for derived homework (e.g. diktatord, øveord)",
           "notify_new_messages": "Notify about new messages",
           "message_notify_service": "Notification service (notify.* or telegram_bot.send_message)",
-          "telegram_chat_id": "Telegram chat ID(s), required for telegram_bot.send_message"
+          "telegram_chat_id": "Telegram chat ID(s), required for telegram_bot.send_message",
+          "scan_interval_minutes": "Integration polling interval in minutes (1–60)"
         }
       }
     },

@@ -17,6 +17,7 @@ from .const import (
     CONF_SCHOOL_URL,
     CONF_USERNAME,
     DEFAULT_SCAN_INTERVAL_MINUTES,
+    OPT_SCAN_INTERVAL_MINUTES,
     DOMAIN,
     OPT_SELECTED_CHILDREN,
     OPT_NOTIFY_NEW_MESSAGES,
@@ -49,7 +50,13 @@ class ForaldreIntraCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=timedelta(minutes=DEFAULT_SCAN_INTERVAL_MINUTES),
+            update_interval=timedelta(
+                minutes=int(
+                    entry.options.get(
+                        OPT_SCAN_INTERVAL_MINUTES, DEFAULT_SCAN_INTERVAL_MINUTES
+                    )
+                )
+            ),
         )
 
     async def async_update_options(self, new_entry: ConfigEntry) -> None:

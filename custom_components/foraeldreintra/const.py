@@ -49,6 +49,7 @@ DEFAULT_SUBJECT_ALIASES = ""
 
 # Intern fast polling
 DEFAULT_SCAN_INTERVAL_MINUTES = 60
+OPT_SCAN_INTERVAL_MINUTES = "scan_interval_minutes"
 
 # Afledte lektier fra ugeplan
 OPT_WEEKPLAN_DERIVED_HOMEWORK_ENABLED = "weekplan_derived_homework_enabled"

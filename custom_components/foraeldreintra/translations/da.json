@@ -51,7 +51,8 @@
           "weekplan_derived_homework_keywords": "Nøgleord til afledte lektier fra ugeplan (fx diktatord, øveord)",
           "notify_new_messages": "Send notifikation ved nye beskeder",
           "message_notify_service": "Notifikationstjeneste (notify.* eller telegram_bot.send_message)",
-          "telegram_chat_id": "Telegram chat-ID(er), kræves til telegram_bot.send_message"
+          "telegram_chat_id": "Telegram chat-ID(er), kræves til telegram_bot.send_message",
+          "scan_interval_minutes": "Opdateringsinterval for integrationen i minutter (1–60)"
         }
       }
     },
