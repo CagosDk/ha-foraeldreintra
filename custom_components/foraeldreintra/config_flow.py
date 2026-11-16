@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
@@ -46,6 +48,9 @@ from .const import (
     OPT_WEEKPLAN_DERIVED_HOMEWORK_ENABLED,
     OPT_WEEKPLAN_DERIVED_HOMEWORK_KEYWORDS,
 )
+
+_LOGGER = logging.getLogger(__name__)
+
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
@@ -137,6 +142,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 ),
             )
         except NotificationDeliveryError:
+            _LOGGER.exception("ForældreIntra testnotifikation kunne ikke sendes")
             return self.async_abort(reason="test_notification_failed")
         return self.async_abort(reason="test_notification_sent")
 

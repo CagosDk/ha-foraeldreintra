@@ -55,7 +55,7 @@ class ForaldreIntraCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def async_update_options(self, new_entry: ConfigEntry) -> None:
         self.entry = new_entry
         self.async_set_updated_data(self.data)
-        self.async_request_refresh()
+        await self.async_request_refresh()
 
     async def _async_update_data(self) -> dict[str, Any]:
         try:

@@ -39,7 +39,7 @@ async def async_send_notification(
             telegram_message += f"\n\n{url}"
         service_data: dict[str, Any] = {
             "message": telegram_message,
-            "chat_id": chat_ids,
+            "target": chat_ids,
         }
     else:
         if service.startswith("notify."):
