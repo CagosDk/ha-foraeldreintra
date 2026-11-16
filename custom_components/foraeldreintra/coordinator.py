@@ -243,69 +243,6 @@ class ForaldreIntraCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
             seen_by_child[child_id] = list(seen)[-1000:]
 
-                    continue
-                if telegram_service and not chat_ids:
-                    _LOGGER.warning(
-                        "Telegram er valgt til ForældreIntra, men chat-ID mangler"
-                    )
-                    continue
-
-                if not self.hass.services.has_service(service_domain, service_name):
-                    _LOGGER.warning(
-                        "ForældreIntra notification service %s.%s findes ikke",
-                        service_domain,
-                        service_name,
-                    )
-                    continue
-
-                sender = str(message.get("sender") or "").strip()
-                body = str(message.get("message") or "").strip()
-                if len(body) > 1000:
-                    body = body[:997] + "..."
-                title = (
-                    f"ForældreIntra · {message.get('child', '')} · "
-                    f"{message.get('subject', 'Ny besked')}"
-                )
-                notification = (
-                    f"{sender}: {body}"
-                    if sender and body
-                    else (body or sender or "Du har modtaget en ny besked.")
-                )
-                url = str(message.get("url") or "")
-
-                try:
-                    if telegram_service:
-                        telegram_message = f"{title}\n\n{notification}"
-                        if url:
-                            telegram_message += f"\n\n{url}"
-                        service_data = {
-                            "message": telegram_message,
-                            "chat_id": chat_ids,
-                        }
-                    else:
-                        service_data = {
-                            "title": title,
-                            "message": notification,
-                            "data": {"url": url, "clickAction": url} if url else {},
-                        }
-                    await self.hass.services.async_call(
-                        service_domain,
-                        service_name,
-                        service_data,
-                        blocking=True,
-                    )
-                except Exception:
-                    _LOGGER.warning(
-                        "Kunne ikke sende ForældreIntra-notifikation via %s.%s",
-                        service_domain,
-                        service_name,
-                    )
-                    continue
-
-                seen.add(message_id)
-
-            seen_by_child[child_id] = list(seen)[-1000:]
-
         self._message_notification_state = {
             "initialized_children": sorted(initialized),
             "seen_by_child": seen_by_child,
